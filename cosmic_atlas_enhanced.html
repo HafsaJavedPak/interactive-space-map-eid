@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cosmic Atlas</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000409;font-family:'Courier New',monospace}
+#wrap{position:relative;width:100%;height:100%;overflow:hidden;touch-action:none;cursor:grab}
+#wrap.dragging{cursor:grabbing}
+#cv{position:absolute;top:0;left:0;width:100%;height:100%}
+
+/* HUD */
+#hud{position:absolute;top:12px;left:14px;pointer-events:none;user-select:none}
+#atlas-title{color:#fff;font-size:clamp(10px,1.8vw,13px);letter-spacing:3px;font-weight:bold;margin-bottom:4px;text-shadow:0 0 10px rgba(126,200,227,0.4)}
+#lod-bar{display:flex;gap:4px;align-items:center;margin-bottom:4px}
+.lod-pip{width:clamp(5px,1vw,8px);height:clamp(5px,1vw,8px);border-radius:50%;border:0.5px solid rgba(126,200,227,0.4);transition:background 0.3s}
+.lod-pip.active{background:#7ec8e3}
+#lod-name{color:#7ec8e3;font-size:clamp(8px,1.5vw,10px);letter-spacing:1px;opacity:0.85}
+#scale-bar{margin-top:6px;display:flex;align-items:center;gap:6px}
+#scale-line{height:1px;background:#7ec8e3;opacity:0.5;transition:width 0.3s}
+#scale-label{color:rgba(126,200,227,0.7);font-size:clamp(7px,1.3vw,9px)}
+
+/* Coordinates */
+#coords{position:absolute;bottom:14px;right:14px;text-align:right;pointer-events:none;user-select:none}
+#coords-ra,#coords-dec{color:rgba(126,200,227,0.75);font-size:clamp(8px,1.5vw,10px);line-height:1.7}
+#coords-dist{color:rgba(126,200,227,0.4);font-size:clamp(7px,1.2vw,9px);margin-top:2px}
+
+/* Zoom display */
+#zoom-hud{position:absolute;top:12px;right:14px;pointer-events:none;user-select:none;text-align:right}
+#zoom-val{color:rgba(126,200,227,0.6);font-size:clamp(8px,1.5vw,10px)}
+#zoom-limit{color:rgba(255,120,80,0.7);font-size:clamp(7px,1.2vw,9px);margin-top:2px;opacity:0;transition:opacity 0.3s}
+#zoom-limit.show{opacity:1}
+
+/* Controls */
+#ctrls{position:absolute;bottom:14px;left:14px;display:flex;flex-direction:column;gap:6px}
+.cb{background:rgba(0,10,30,0.7);border:0.5px solid rgba(126,200,227,0.3);color:#7ec8e3;font-size:clamp(13px,2.5vw,17px);width:clamp(32px,6vw,40px);height:clamp(32px,6vw,40px);cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:5px;transition:background 0.15s;backdrop-filter:blur(4px)}
+.cb:hover{background:rgba(126,200,227,0.15)}
+.cb:active{transform:scale(0.95)}
+
+/* Legend */
+#legend{position:absolute;right:14px;top:50%;transform:translateY(-50%);pointer-events:none;user-select:none;display:flex;flex-direction:column;gap:5px}
+.leg-item{display:flex;align-items:center;gap:6px;font-size:clamp(7px,1.2vw,9px);color:rgba(126,200,227,0.55);white-space:nowrap;opacity:0;transition:opacity 0.4s}
+.leg-item.vis{opacity:1}
+.leg-dot{width:10px;height:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+
+/* Tooltip */
+#tip{position:absolute;background:rgba(0,6,22,0.95);border:0.5px solid rgba(126,200,227,0.5);color:#b8e4f5;font-family:'Courier New',monospace;font-size:clamp(9px,1.6vw,11px);padding:8px 11px;border-radius:5px;pointer-events:none;display:none;line-height:1.75;max-width:min(220px,50vw);z-index:100;backdrop-filter:blur(4px)}
+#tip b{color:#fff}
+#tip .tip-tag{color:#7ec8e3;font-size:0.9em}
+
+/* AI fetch indicator */
+#ai-status{position:absolute;bottom:58px;left:14px;font-size:clamp(7px,1.3vw,9px);color:rgba(126,200,227,0.6);display:none;animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:0.4}50%{opacity:1}}
+
+/* Loading overlay for initial render */
+#loading{position:absolute;inset:0;background:#000409;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:200;transition:opacity 0.5s}
+#loading.done{opacity:0;pointer-events:none}
+#loading-text{color:#7ec8e3;font-size:clamp(10px,2vw,13px);letter-spacing:2px}
+#loading-bar{width:200px;height:1px;background:rgba(126,200,227,0.2);position:relative;overflow:hidden}
+#loading-fill{height:100%;background:#7ec8e3;width:0%;transition:width 0.3s}
+</style>
+</head>
+<body>
+<div id="loading">
+  <div id="loading-text">INITIALISING COSMIC ATLAS</div>
+  <div id="loading-bar"><div id="loading-fill"></div></div>
+</div>
+
+<div id="wrap">
+  <canvas id="cv"></canvas>
+
+  <div id="hud">
+    <div id="atlas-title">COSMIC ATLAS</div>
+    <div id="lod-bar">
+      <div class="lod-pip" id="p0"></div>
+      <div class="lod-pip" id="p1"></div>
+      <div class="lod-pip" id="p2"></div>
+      <div class="lod-pip" id="p3"></div>
+      <div class="lod-pip" id="p4"></div>
+      <div class="lod-pip" id="p5"></div>
+      <div class="lod-pip" id="p6"></div>
+      <div class="lod-pip" id="p7"></div>
+      <div class="lod-pip" id="p8"></div>
+      <div class="lod-pip" id="p9"></div>
+    </div>
+    <div id="lod-name">LOCAL GROUP</div>
+    <div id="scale-bar">
+      <div id="scale-line" style="width:60px"></div>
+      <div id="scale-label">5 Mly</div>
+    </div>
+  </div>
+
+  <div id="zoom-hud">
+    <div id="zoom-val">1.0×</div>
+    <div id="zoom-hint" style="color:rgba(126,200,227,0.4);font-size:clamp(7px,1.2vw,9px);margin-top:2px"></div>
+  </div>
+
+  <div id="coords">
+    <div id="coords-ra">RA 12h 00m 00s</div>
+    <div id="coords-dec">Dec +00° 00′ 00″</div>
+    <div id="coords-dist"></div>
+  </div>
+
+  <div id="ctrls">
+    <button class="cb" id="bi" aria-label="Zoom in">+</button>
+    <button class="cb" id="bo" aria-label="Zoom out">−</button>
+    <button class="cb" id="br" aria-label="Reset" style="font-size:clamp(10px,2vw,13px)">⟳</button>
+  </div>
+
+  <div id="legend">
+    <div class="leg-item" id="leg-mw">
+      <div class="leg-dot"><svg width="10" height="10"><ellipse cx="5" cy="5" rx="5" ry="2" fill="none" stroke="#7ec8e3" stroke-width="0.8"/></svg></div>
+      <span>Milky Way group</span>
+    </div>
+    <div class="leg-item" id="leg-m31">
+      <div class="leg-dot"><svg width="10" height="10"><ellipse cx="5" cy="5" rx="5" ry="2" fill="none" stroke="#b8a0f0" stroke-width="0.8"/></svg></div>
+      <span>Andromeda group</span>
+    </div>
+    <div class="leg-item" id="leg-other">
+      <div class="leg-dot"><svg width="10" height="10"><ellipse cx="5" cy="5" rx="5" ry="2" fill="none" stroke="#a0c870" stroke-width="0.8"/></svg></div>
+      <span>Other LG members</span>
+    </div>
+    <div class="leg-item" id="leg-nearby">
+      <div class="leg-dot"><svg width="10" height="10"><ellipse cx="5" cy="5" rx="4" ry="1.5" fill="none" stroke="#f0a840" stroke-width="0.8"/></svg></div>
+      <span>Nearby galaxies</span>
+    </div>
+    <div class="leg-item" id="leg-con">
+      <div class="leg-dot"><svg width="10" height="10"><line x1="1" y1="5" x2="9" y2="5" stroke="#6496dc" stroke-width="0.8" stroke-dasharray="2,2"/></svg></div>
+      <span>Constellation</span>
+    </div>
+    <div class="leg-item" id="leg-glob">
+      <div class="leg-dot"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="none" stroke="#ffc850" stroke-width="0.8"/><line x1="5" y1="1" x2="5" y2="9" stroke="#ffc850" stroke-width="0.5"/><line x1="1" y1="5" x2="9" y2="5" stroke="#ffc850" stroke-width="0.5"/></svg></div>
+      <span>Globular cluster</span>
+    </div>
+    <div class="leg-item" id="leg-neb">
+      <div class="leg-dot"><svg width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="#50c8ff" stroke-width="0.8"/></svg></div>
+      <span>Nebula</span>
+    </div>
+    <div class="leg-item" id="leg-bh">
+      <div class="leg-dot"><svg width="10" height="10"><circle cx="5" cy="5" r="3" fill="none" stroke="#ff5050" stroke-width="0.8"/><circle cx="5" cy="5" r="1.5" fill="#ff505044"/></svg></div>
+      <span>Black hole / AGN</span>
+    </div>
+    <div class="leg-item" id="leg-exo">
+      <div class="leg-dot"><svg width="10" height="10"><circle cx="5" cy="5" r="3" fill="none" stroke="#50ffb0" stroke-width="0.8"/><text x="5" y="8" text-anchor="middle" font-size="6" fill="#50ffb0">e</text></svg></div>
+      <span>Exoplanet host</span>
+    </div>
+  </div>
+
+  <div id="tip"></div>
+  <div id="ai-status">⟳ FETCHING DEEP FIELD DATA…</div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),wrap=document.getElementById('wrap'),tip=document.getElementById('tip');
+let W=0,H=0,zoom=1,panX=0,panY=0,drag=false,lx=0,ly=0,mx=0,my=0;
+let ptd=null,raf=null,needsDraw=true,currentLOD=0;
+let aiCache={},aiFetching=new Set();
+
+// LOD levels 0–10 (infinite zoom)
+// 0: Local Group (zoom 0.4–1.2)      → all nearby galaxies
+// 1: Milky Way region (1.2–2.5)      → MW dominant, satellites, named neighbors
+// 2: Constellation field (2.5–5)     → constellation lines + bright stars
+// 3: Star field (5–9)                → many stars + DSOs
+// 4: Stellar detail (9–16)           → dim stars, all DSOs, exoplanet markers
+// 5: Deep field (16–28)              → AI-augmented faint objects, nebula regions
+// 6: Ultra deep (28–60)              → maximum detail, AI deep field
+// 7: Stellar neighbourhood (60–200)  → nearby star systems, AI star details
+// 8: Star system (200–800)           → solar-system scale, AI planets
+// 9: Planetary (800–4000)            → planet detail, moons, AI surface data
+// 10: Surface / Ultra zoom (4000+)   → procedural surface + AI descriptions
+
+const LOD_BREAKS=[1.2,2.5,5,9,16,28,60,200,800,4000];
+const LOD_NAMES=['LOCAL GROUP','MILKY WAY REGION','CONSTELLATION FIELD','STAR FIELD','STELLAR DETAIL','DEEP FIELD','ULTRA DEEP','STELLAR NEIGHBOURHOOD','STAR SYSTEM','PLANETARY','SURFACE DETAIL'];
+const ZOOM_MAX=Infinity,ZOOM_MIN=0.4;
+
+// ════════════════════════════════════════════════════════════════
+// ASTRONOMICAL DATA
+// ════════════════════════════════════════════════════════════════
+
+// Local Group & nearby galaxies (47 objects)
+const GALAXIES=[
+  // ── Milky Way subgroup ──
+  {n:'Milky Way',sh:'MW',ra:266.4,dec:-29.0,dist:0,type:'SBbc',mag:-20.9,diam:105,group:'MW',notes:'Our galaxy. ~250–400B stars. Bar structure. Sgr A* central black hole (4.15M M☉). ~30k ly thick disk.'},
+  {n:'Large Magellanic Cloud',sh:'LMC',ra:80.9,dec:-69.8,dist:0.158,type:'SB(s)m',mag:0.9,diam:14,group:'MW',notes:'158k ly. Most massive MW satellite. Active star-forming regions including 30 Doradus (Tarantula Nebula). ~30B stars.'},
+  {n:'Small Magellanic Cloud',sh:'SMC',ra:16.0,dec:-72.8,dist:0.200,type:'SB(s)m pec',mag:2.7,diam:7,group:'MW',notes:'200k ly. 3B stars. Connected to LMC via Magellanic Bridge of gas.'},
+  {n:'Canis Major Dwarf',sh:'CMa Dw',ra:107.0,dec:-28.0,dist:0.025,type:'Irr',mag:null,diam:null,group:'MW',notes:'25k ly. Closest known MW satellite. May be remnant of tidally disrupted galaxy.'},
+  {n:'Sagittarius Dwarf Sph.',sh:'Sgr dSph',ra:283.8,dec:-30.5,dist:0.065,type:'dSph/E7',mag:null,diam:10,group:'MW',notes:'65k ly. Currently being tidally disrupted and absorbed by the Milky Way. Has 4 globular clusters.'},
+  {n:'Ursa Minor Dwarf',sh:'UMi dSph',ra:227.3,dec:67.2,dist:0.206,type:'dSph',mag:null,diam:0.5,group:'MW',notes:'206k ly. Very low surface brightness. Mostly old, metal-poor stars.'},
+  {n:'Draco Dwarf',sh:'Dra dSph',ra:260.1,dec:57.9,dist:0.258,type:'dSph/E0',mag:null,diam:0.5,group:'MW',notes:'258k ly. One of the lowest surface brightnesses of any known galaxy.'},
+  {n:'Sculptor Dwarf',sh:'Scl dSph',ra:15.0,dec:-33.7,dist:0.279,type:'dSph/E3',mag:null,diam:1.0,group:'MW',notes:'279k ly. First dwarf spheroidal found (1938). Ancient stellar population, ~10 Gyr.'},
+  {n:'Sextans Dwarf',sh:'Sex dSph',ra:153.3,dec:-1.6,dist:0.280,type:'dSph',mag:null,diam:2.0,group:'MW',notes:'280k ly. Very extended, low-luminosity. Discovered 1990.'},
+  {n:'Carina Dwarf',sh:'Car dSph',ra:100.4,dec:-50.9,dist:0.330,type:'dSph/E4',mag:null,diam:0.5,group:'MW',notes:'330k ly. Multiple stellar populations spanning several Gyr.'},
+  {n:'Fornax Dwarf',sh:'Fnx dSph',ra:39.9,dec:-34.5,dist:0.460,type:'dSph/E2',mag:null,diam:2.6,group:'MW',notes:'460k ly. Contains 6 globular clusters including one suspected to host an intermediate-mass black hole.'},
+  {n:'Leo II',sh:'Leo II',ra:168.4,dec:22.2,dist:0.690,type:'dSph/E0',mag:null,diam:0.5,group:'MW',notes:'690k ly. Very metal-poor, old stellar population.'},
+  {n:'Leo I',sh:'Leo I',ra:152.1,dec:12.3,dist:0.820,type:'dSph/E3',mag:null,diam:0.8,group:'MW',notes:'820k ly. Youngest and most metal-rich MW dwarf spheroidal. May be unbound.'},
+  {n:'Phoenix Dwarf',sh:'Phx Dw',ra:27.8,dec:-44.4,dist:1.440,type:'dIrr/dSph',mag:null,diam:0.4,group:'MW',notes:'1.44 Mly. Transitional type between irregular and spheroidal. Contains both old and intermediate-age stars.'},
+  // ── Andromeda subgroup ──
+  {n:'Andromeda Galaxy',sh:'M31',ra:10.7,dec:41.3,dist:2.537,type:'SA(s)b',mag:3.4,diam:220,group:'M31',notes:'2.537 Mly. Largest Local Group member. ~1 trillion stars. Will merge with Milky Way in ~4.5 Gyr. Contains ~460 globular clusters.'},
+  {n:'Triangulum Galaxy',sh:'M33',ra:23.5,dec:30.7,dist:2.730,type:'SA(s)cd',mag:5.7,diam:60,group:'M31',notes:'2.73 Mly. Third-largest Local Group member. ~40B stars. Contains NGC 604, one of the largest H-II regions known.'},
+  {n:'M32 (NGC 221)',sh:'M32',ra:10.7,dec:40.9,dist:2.490,type:'E2',mag:8.7,diam:6.5,group:'M31',notes:'2.49 Mly. Compact elliptical satellite of M31. Contains a supermassive black hole (~3M M☉). Dense stellar core.'},
+  {n:'M110 (NGC 205)',sh:'M110',ra:10.1,dec:41.7,dist:2.690,type:'dE5 pec',mag:8.9,diam:17,group:'M31',notes:'2.69 Mly. Satellite of M31. Unusually dusty for elliptical. Contains young blue stars suggesting recent star formation.'},
+  {n:'NGC 185',sh:'NGC 185',ra:9.7,dec:48.3,dist:2.050,type:'dE3 pec',mag:9.2,diam:8,group:'M31',notes:'2.05 Mly. M31 satellite. Contains dust and young stars (unusual for a dE). ~68k ly diameter.'},
+  {n:'NGC 147',sh:'NGC 147',ra:8.3,dec:48.5,dist:2.200,type:'dE5 pec',mag:9.3,diam:13,group:'M31',notes:'2.2 Mly. M31 satellite. Companion to NGC 185. Lack of central concentration distinguishes it from typical dEs.'},
+  {n:'IC 10',sh:'IC 10',ra:5.1,dec:59.3,dist:2.150,type:'dIrr/BCD',mag:8.7,diam:5.5,group:'M31',notes:'2.15 Mly. Closest known starburst galaxy. High star-formation rate, many Wolf-Rayet stars. M31 satellite.'},
+  {n:'Andromeda I',sh:'And I',ra:11.4,dec:38.0,dist:2.430,type:'dSph',mag:null,diam:0.8,group:'M31',notes:'2.43 Mly. Satellite of M31. Discovered 1970 on Palomar Observatory Sky Survey plates.'},
+  {n:'Andromeda II',sh:'And II',ra:19.1,dec:33.4,dist:2.130,type:'dSph',mag:null,diam:1.1,group:'M31',notes:'2.13 Mly. M31 satellite. Extended dwarf spheroidal, possibly formed from merger.'},
+  {n:'Andromeda III',sh:'And III',ra:11.9,dec:36.5,dist:2.440,type:'dSph',mag:null,diam:0.6,group:'M31',notes:'2.44 Mly. M31 satellite. Low surface brightness, mostly old stars.'},
+  {n:'Andromeda VII',sh:'And VII',ra:351.6,dec:23.4,dist:2.180,type:'dSph',mag:null,diam:1.0,group:'M31',notes:'2.18 Mly. Also known as Cassiopeia Dwarf. M31 satellite with extremely old stellar population.'},
+  {n:'IC 1613',sh:'IC 1613',ra:16.2,dec:2.1,dist:2.380,type:'IB(s)m',mag:9.3,diam:16,notes:'2.38 Mly. Isolated irregular galaxy in LG outskirts. Virtually no dust, makes it ideal for Cepheid distance studies.',group:'Other'},
+  // ── Other LG members ──
+  {n:"Barnard's Galaxy",sh:'NGC 6822',ra:296.2,dec:-14.8,dist:1.630,type:'IB(s)m',mag:9.3,diam:10,group:'Other',notes:'1.63 Mly. One of the closest galaxies. Hubble used Cepheids here in 1925 to measure distances to external galaxies.'},
+  {n:'Wolf-Lundmark-Melotte',sh:'WLM',ra:1.4,dec:-15.5,dist:3.040,type:'IB(s)m',mag:11.0,diam:8,group:'Other',notes:'3.04 Mly. Isolated irregular near the outskirts of the Local Group. Low metallicity, ancient stellar population.'},
+  {n:'Pegasus Dwarf Irr.',sh:'DDO 216',ra:352.0,dec:14.7,dist:2.700,type:'dIrr',mag:null,diam:0.5,group:'Other',notes:'2.7 Mly. Isolated Local Group dwarf. Has both old and young stellar populations.'},
+  {n:'Leo A',sh:'Leo A',ra:155.3,dec:30.8,dist:2.250,type:'dIrr',mag:null,diam:0.8,group:'Other',notes:'2.25 Mly. Isolated, gas-rich dwarf. Unusually young stellar population — most stars formed in last 2 Gyr.'},
+  {n:'Aquarius Dwarf',sh:'DDO 210',ra:311.7,dec:-13.0,dist:3.140,type:'dIrr/dSph',mag:null,diam:0.4,group:'Other',notes:'3.14 Mly. Near LG boundary. Transitional type, very low luminosity.'},
+  {n:'Tucana Dwarf',sh:'Tuc Dw',ra:354.4,dec:-64.4,dist:2.870,type:'dSph',mag:null,diam:0.3,group:'Other',notes:'2.87 Mly. Isolated dwarf spheroidal, possibly unbound from LG. Very old stellar population.'},
+  {n:'Cetus Dwarf',sh:'Cet Dw',ra:26.3,dec:-11.0,dist:2.460,type:'dSph',mag:null,diam:0.7,group:'Other',notes:'2.46 Mly. Isolated dwarf spheroidal. Old metal-poor stars. Possibly a backsplash galaxy from M31.'},
+  // ── Nearby galaxies (outside LG ~4–25 Mly) ──
+  {n:'NGC 55',sh:'NGC 55',ra:3.7,dec:-39.2,dist:6.5,type:'SB(s)m',mag:8.0,diam:65,group:'Nearby',notes:'6.5 Mly. Sculptor Group. Edge-on irregular, sometimes called the southern twin of M33. Active star formation.'},
+  {n:'NGC 300',sh:'NGC 300',ra:13.7,dec:-37.7,dist:6.1,type:'SA(s)d',mag:8.7,diam:95,group:'Nearby',notes:'6.1 Mly. Sculptor Group. One of the best-studied late-type spirals. Very low surface brightness, extended disk.'},
+  {n:'NGC 253 (Sculptor)',sh:'NGC 253',ra:11.9,dec:-25.3,dist:11.4,type:'SAB(s)c',mag:7.1,diam:90,group:'Nearby',notes:'11.4 Mly. Sculptor Group dominant. Silver Dollar Galaxy. Strong starburst, one of the brightest infrared galaxies in the sky.'},
+  {n:'NGC 247',sh:'NGC 247',ra:11.8,dec:-20.8,dist:11.1,type:'SAB(s)d',mag:9.1,diam:70,group:'Nearby',notes:'11.1 Mly. Sculptor Group. Contains a large void region in its disk nicknamed the "Donut Hole".'},
+  {n:'Centaurus A',sh:'NGC 5128',ra:201.4,dec:-43.0,dist:13.0,type:'S0 pec',mag:7.0,diam:60,group:'Nearby',notes:'13 Mly. Nearest radio galaxy. Giant elliptical with active galactic nucleus. Visible jet from central supermassive BH.'},
+  {n:"Bode's Galaxy",sh:'M81',ra:148.9,dec:69.1,dist:11.7,type:'SA(s)ab',mag:6.9,diam:90,group:'Nearby',notes:'11.7 Mly. M81 Group dominant. Grand design spiral with well-defined arms. Central black hole 70M M☉.'},
+  {n:'Cigar Galaxy',sh:'M82',ra:148.9,dec:69.7,dist:12.0,type:'I0 sp',mag:8.4,diam:37,group:'Nearby',notes:'12 Mly. M81 Group. Starburst galaxy, 10× star-formation rate of Milky Way. Superwind outflow of plasma visible in X-ray and Hα.'},
+  {n:'NGC 2403',sh:'NGC 2403',ra:114.2,dec:65.6,dist:8.0,type:'SAB(s)cd',mag:8.9,diam:20,group:'Nearby',notes:'8 Mly. M81 Group member. Contains many H-II regions and has hosted multiple supernovae.'},
+  {n:'NGC 4736 (M94)',sh:'M94',ra:192.7,dec:41.1,dist:16.0,type:'(R)SA(r)ab',mag:8.2,diam:50,group:'Nearby',notes:'16 Mly. Circinus group. Starburst ring surrounding nucleus. Active star-formation in inner ring.'},
+  {n:'Pinwheel Galaxy',sh:'M101',ra:210.8,dec:54.3,dist:20.9,type:'SAB(rs)cd',mag:7.9,diam:170,group:'Nearby',notes:'20.9 Mly. Face-on grand-design spiral. 1,000B stars. Hosted SN 2011fe, a Type Ia supernova.'},
+  {n:'Whirlpool Galaxy',sh:'M51a',ra:202.5,dec:47.2,dist:23.0,type:'SA(s)bc pec',mag:8.4,diam:87,group:'Nearby',notes:'23 Mly. Interacting with companion NGC 5195. Classic textbook spiral. Hosted 3 supernovae in 50 years.'},
+  {n:'Sombrero Galaxy',sh:'M104',ra:189.9,dec:-11.6,dist:28.0,type:'SA(s)a',mag:8.0,diam:50,group:'Nearby',notes:'28 Mly. Edge-on spiral with prominent dust lane and large central bulge. 10× Milky Way mass.'},
+  {n:'NGC 4449',sh:'NGC 4449',ra:187.1,dec:44.1,dist:12.5,type:'IBm',mag:9.6,diam:20,group:'Nearby',notes:'12.5 Mly. Starburst dwarf irregular. Remarkably uniform star formation across entire disk.'},
+];
+
+// Named stars — 60 objects with full data
+const STARS=[
+  {n:'Sirius',ra:101.3,dec:-16.7,mag:-1.46,t:'A1V',sys:'α CMa',dist_ly:8.6,exo:false,notes:'Brightest star in the sky. White main sequence. Has a white dwarf companion Sirius B.'},
+  {n:'Canopus',ra:95.9,dec:-52.7,mag:-0.74,t:'F0Ib',sys:'α Car',dist_ly:310,exo:false,notes:'Second brightest. Yellow-white supergiant. Used as spacecraft navigation reference.'},
+  {n:'Rigil Kentaurus',ra:219.9,dec:-60.8,mag:-0.29,t:'G2V',sys:'α Cen A',dist_ly:4.37,exo:false,notes:'Nearest star system (4.37 ly). Triple system — Rigil Kent A, B, and Proxima Centauri.'},
+  {n:'Proxima Centauri',ra:217.4,dec:-62.7,mag:11.1,t:'M5Ve',sys:'α Cen C',dist_ly:4.24,exo:true,notes:'Nearest individual star to Sun (4.24 ly). Red dwarf. Hosts Proxima Cen b (habitable zone) and Proxima Cen d.'},
+  {n:'Arcturus',ra:213.9,dec:19.2,mag:-0.05,t:'K1.5IIIFe',sys:'α Boo',dist_ly:36.7,exo:false,notes:'Brightest star in northern hemisphere. Orange giant, ~25× Sun diameter. Part of a stream of stars.'},
+  {n:'Vega',ra:279.2,dec:38.8,mag:0.03,t:'A0Va',sys:'α Lyr',dist_ly:25,exo:false,notes:'Defined the standard zero magnitude. Debris disk suggests planetary system. Former pole star ~12,000 BCE.'},
+  {n:'Capella',ra:79.2,dec:46.0,mag:0.08,t:'G3+G8III',sys:'α Aur',dist_ly:42.9,exo:false,notes:'Six-star system. Two giant binaries plus two red dwarf pairs. Both giants evolving off main sequence.'},
+  {n:'Rigel',ra:78.6,dec:-8.2,mag:0.12,t:'B8Ia',sys:'β Ori',dist_ly:860,exo:false,notes:'Blue-white supergiant, ~120,000× solar luminosity. Will eventually explode as a supernova.'},
+  {n:'Procyon',ra:114.8,dec:5.2,mag:0.34,t:'F5IV-V',sys:'α CMi',dist_ly:11.5,exo:false,notes:'Subgiant beginning to evolve. Has white dwarf companion. Name means "before the dog" (rises before Sirius).'},
+  {n:'Achernar',ra:24.4,dec:-57.2,mag:0.46,t:'B3Vpe',sys:'α Eri',dist_ly:139,exo:false,notes:'Oblate rapid rotator — spins so fast it bulges at equator by 56%. Be star with circumstellar disk.'},
+  {n:'Betelgeuse',ra:88.8,dec:7.4,mag:0.50,t:'M1-M2Ia-ab',sys:'α Ori',dist_ly:700,exo:false,notes:'Red supergiant, ~700× Sun diameter. Will explode as supernova. Experienced "Great Dimming" in 2019–2020.'},
+  {n:'Hadar',ra:210.9,dec:-60.4,mag:0.61,t:'B1III',sys:'β Cen',dist_ly:390,exo:false,notes:'Blue giant, spectroscopic triple. Second brightest star in Centaurus. Will become supernova.'},
+  {n:'Altair',ra:297.7,dec:8.9,mag:0.77,t:'A7Vn',sys:'α Aql',dist_ly:16.7,exo:false,notes:'Oblate rapid rotator, 286 km/s equatorial spin. Equator is 20% wider than poles. Forms Summer Triangle.'},
+  {n:'Aldebaran',ra:68.9,dec:16.5,mag:0.85,t:'K5+III',sys:'α Tau',dist_ly:65.3,exo:false,notes:'Red giant, 44× Sun diameter. Eye of the Bull in Taurus. Has a faint M-dwarf companion.'},
+  {n:'Antares',ra:247.3,dec:-26.4,mag:1.05,t:'M1.5Iab-b',sys:'α Sco',dist_ly:550,exo:false,notes:'Red supergiant, ~700× Sun diameter. Rival of Mars (name means "rival of Ares"). Has hot blue companion.'},
+  {n:'Spica',ra:201.3,dec:-11.2,mag:1.05,t:'B1V+B2V',sys:'α Vir',dist_ly:250,exo:false,notes:'Spectroscopic binary, both components distorted by tidal forces. Hipparchus used it to discover precession of equinoxes.'},
+  {n:'Pollux',ra:116.3,dec:28.0,mag:1.14,t:'K0IIIb',sys:'β Gem',dist_ly:33.7,exo:true,notes:'Confirmed exoplanet Pollux b (Thestias) — Jupiter-mass planet. Brightest giant with known exoplanet.'},
+  {n:'Fomalhaut',ra:344.4,dec:-29.6,mag:1.16,t:'A3Va',sys:'α PsA',dist_ly:25.1,exo:true,notes:'Dusty debris disk imaged by Hubble. Fomalhaut b may be a debris cloud from two Pluto-sized colliding bodies.'},
+  {n:'Deneb',ra:310.4,dec:45.3,mag:1.25,t:'A2Ia',sys:'α Cyg',dist_ly:2600,exo:false,notes:'Hypergiant, ~100,000× solar luminosity, ~200× sun diameter. Uncertain distance (1,500–3,000 ly). Forms Summer Triangle.'},
+  {n:'Mimosa',ra:191.9,dec:-59.7,mag:1.25,t:'B0.5III',sys:'β Cru',dist_ly:280,exo:false,notes:'Blue giant, beta of Southern Cross. Slowly pulsating B star with 5-day brightness variation.'},
+  {n:'Acrux',ra:186.6,dec:-63.1,mag:0.76,t:'B0.5IV+B1V',sys:'α Cru',dist_ly:321,exo:false,notes:'Brightest star in Southern Cross. Triple system — A and B are spectroscopic binaries.'},
+  {n:'Gacrux',ra:187.8,dec:-57.1,mag:1.59,t:'M3.5III',sys:'γ Cru',dist_ly:88,exo:false,notes:'Red giant at top of Southern Cross. Brightest M-class star in the southern sky. Semi-regular variable.'},
+  {n:'Regulus',ra:152.1,dec:11.9,mag:1.36,t:'B7Vn',sys:'α Leo',dist_ly:77,exo:false,notes:'Rapid rotator, ~96% of breakup velocity. If rotating slightly faster would self-destruct. Heart of Leo.'},
+  {n:'Adhara',ra:104.7,dec:-28.9,mag:1.50,t:'B2II',sys:'ε CMa',dist_ly:430,exo:false,notes:'Brightest UV source in the sky after the Sun. Once the brightest star (4.7 Mya) due to its past proximity.'},
+  {n:'Castor',ra:113.6,dec:31.9,mag:1.58,t:'A1V+A2Vm',sys:'α Gem',dist_ly:51,exo:false,notes:'Remarkable sextuple system: 3 pairs of binary stars all orbiting each other. Each visual star is itself a spectroscopic binary.'},
+  {n:'Shaula',ra:263.4,dec:-37.1,mag:1.62,t:'B1.5IV+?',sys:'λ Sco',dist_ly:570,exo:false,notes:'Sting of the Scorpion. Close binary system, both components are Beta Cephei pulsators.'},
+  {n:'Bellatrix',ra:81.3,dec:6.3,mag:1.64,t:'B2III',sys:'γ Ori',dist_ly:243,exo:false,notes:'Left shoulder of Orion. Hot blue giant, 6× Sun mass. Will become supernova. Name means "the female warrior".'},
+  {n:'Elnath',ra:81.6,dec:28.6,mag:1.65,t:'B7III',sys:'β Tau',dist_ly:134,exo:false,notes:'Shared boundary between Taurus and Auriga (once listed in both). Blue-white giant.'},
+  {n:'Alnilam',ra:84.1,dec:-1.2,mag:1.70,t:'B0Ia',sys:'ε Ori',dist_ly:1340,exo:false,notes:'Central star of Orion\'s Belt. Blue supergiant, ~375,000× solar luminosity. Surrounded by reflection nebula NGC 1990.'},
+  {n:'Alnitak',ra:85.2,dec:-1.9,mag:1.77,t:'O9.7Ib',sys:'ζ Ori',dist_ly:1200,exo:false,notes:'Easternmost belt star of Orion. Ionises the Flame Nebula. Horsehead Nebula nearby.'},
+  {n:'Mintaka',ra:83.0,dec:-0.3,mag:2.21,t:'O9.5II',sys:'δ Ori',dist_ly:900,exo:false,notes:'Westernmost belt star of Orion. Near-perfect alignment with celestial equator. Eclipsing binary.'},
+  {n:'Alkaid',ra:206.9,dec:49.3,mag:1.86,t:'B3V',sys:'η UMa',dist_ly:103,exo:false,notes:'Tip of the Big Dipper handle. Hot blue main sequence. Not gravitationally bound to the Ursa Major Moving Group.'},
+  {n:'Sargas',ra:264.3,dec:-43.0,mag:1.86,t:'F0II',sys:'θ Sco',dist_ly:300,exo:false,notes:'Bright yellow-white supergiant in the tail of Scorpius. Also called Girtab.'},
+  {n:'Avior',ra:125.6,dec:-59.5,mag:1.86,t:'K3III+B2',sys:'ε Car',dist_ly:630,exo:false,notes:'Binary in Carina. Used in stellar navigation. Orange giant + hot blue companion.'},
+  {n:'Dubhe',ra:165.9,dec:61.8,mag:1.79,t:'K0III',sys:'α UMa',dist_ly:123,exo:false,notes:'Pointer star to Polaris. Orange giant, one of the brightest K-class stars. Orbiting companion every 44 years.'},
+  {n:'Polaris',ra:37.9,dec:89.3,mag:1.97,t:'F7Ib',sys:'α UMi',dist_ly:323,exo:false,notes:'North Pole Star, within 0.7° of celestial north pole. Cepheid variable, closest Cepheid to Earth. Triple system.'},
+  {n:'Mirfak',ra:51.1,dec:49.9,mag:1.79,t:'F5Ib',sys:'α Per',dist_ly:592,exo:false,notes:'Brightest star in Perseus. Supergiant, part of Alpha Persei Moving Group. 9,000× sun luminosity.'},
+  {n:'Kochab',ra:222.7,dec:74.2,mag:2.07,t:'K4III',sys:'β UMi',dist_ly:130,exo:false,notes:'Formerly the pole star (~1100 BCE to 600 CE) due to precession. Orange giant.'},
+  {n:'Schedar',ra:9.2,dec:59.0,mag:2.24,t:'K0IIIa',sys:'α Cas',dist_ly:228,exo:false,notes:'Brightest star in Cassiopeia. Orange giant with very slight variability.'},
+  {n:'Caph',ra:1.4,dec:59.1,mag:2.28,t:'F2III-IV',sys:'β Cas',dist_ly:54.5,exo:false,notes:'Delta Scuti pulsating variable. Fastest rotating star easily visible to naked eye.'},
+  {n:'Nunki',ra:283.8,dec:-26.3,mag:2.05,t:'B2.5V',sys:'σ Sgr',dist_ly:228,exo:false,notes:'Second brightest in Sagittarius. Hot blue main-sequence, part of Scorpius-Centaurus OB association.'},
+  {n:'Rasalhague',ra:263.7,dec:12.6,mag:2.07,t:'A5III',sys:'α Oph',dist_ly:46.7,exo:false,notes:'Head of the Snake-bearer. Rapid rotator. "Rasalhague" means "head of the serpent collector" in Arabic.'},
+  {n:'Alphecca',ra:233.7,dec:26.7,mag:2.22,t:'A0V',sys:'α CrB',dist_ly:74.7,exo:false,notes:'Gemma or Pearl of the Crown. Spectroscopic binary; eclipses every 17.36 days cause slight dimming.'},
+  {n:'Atria',ra:247.4,dec:-68.7,mag:1.91,t:'K2IIb-III',sys:'α TrA',dist_ly:415,exo:false,notes:'Brightest star in Triangulum Australe. Luminous orange giant, ~5,500× solar luminosity.'},
+  {n:'Peacock',ra:306.4,dec:-56.7,mag:1.94,t:'B2IV',sys:'α Pav',dist_ly:179,exo:false,notes:'Brightest star in Pavo. Named "Peacock" by the British Air Ministry for navigation training in 1930s.'},
+  {n:'Mirzam',ra:95.7,dec:-17.9,mag:1.98,t:'B1II-III',sys:'β CMa',dist_ly:500,exo:false,notes:'The Announcer — rises before Sirius. Short-period pulsating Beta Cephei variable.'},
+  {n:'Naos',ra:120.9,dec:-40.0,mag:2.21,t:'O4If(n)p',sys:'ζ Pup',dist_ly:1080,exo:false,notes:'One of the hottest, most luminous stars visible (54,000 K). Runaway star from Zeta Puppis binary system.'},
+  {n:'Izar',ra:221.2,dec:27.1,mag:2.70,t:'K0II+A2V',sys:'ε Boo',dist_ly:203,exo:false,notes:'Pulcherrima (Most Beautiful). Classic double star — gold and blue-green contrast visible in small telescopes.'},
+  {n:'Mizar',ra:200.9,dec:54.9,mag:2.04,t:'A2V',sys:'ζ UMa',dist_ly:82.9,exo:false,notes:'Middle star in Big Dipper handle. First double star discovered (1617). Quadruple system — 2 spectroscopic binaries.'},
+  {n:'Cor Caroli',ra:194.0,dec:38.3,mag:2.89,t:'A0sp',sys:'α CVn',dist_ly:110,exo:false,notes:'Prototype of Alpha2 Canum Venaticorum magnetic variable stars. Unusual strong silicon and mercury lines.'},
+  {n:'Saiph',ra:86.9,dec:-9.7,mag:2.07,t:'B0.5Ia',sys:'κ Ori',dist_ly:722,exo:false,notes:'Blue supergiant, one of Orion\'s feet. Despite similar distance to Rigel, appears dimmer in visible light.'},
+  {n:'Wezen',ra:107.1,dec:-26.4,mag:1.83,t:'F8Ia',sys:'δ CMa',dist_ly:1600,exo:false,notes:'Yellow-white supergiant. If placed at Sirius\'s distance, would be 3× brighter than Venus.'},
+  {n:'Phad',ra:178.5,dec:53.7,mag:2.44,t:'A0Ve',sys:'γ UMa',dist_ly:83.2,exo:false,notes:'In the Big Dipper bowl. Rapidly rotating Be star with circumstellar disk. Core of the Ursa Major Moving Group.'},
+  {n:'Merak',ra:165.5,dec:56.4,mag:2.35,t:'A1IVps',sys:'β UMa',dist_ly:79.7,exo:false,notes:'Pointer star to Polaris with Dubhe. Chemically peculiar lambda Bootis type. Excess infrared from debris disk.'},
+  {n:'Thuban',ra:211.1,dec:64.4,mag:3.65,t:'A0III',sys:'α Dra',dist_ly:303,exo:false,notes:'North Pole Star ~2700 BCE (during ancient Egypt). Will be pole star again in ~21,000 CE. Spectroscopic binary.'},
+  {n:'Tau Ceti',ra:26.0,dec:-15.9,mag:3.49,t:'G8V',sys:'τ Cet',dist_ly:11.9,exo:true,notes:'One of the nearest Sun-like stars. 5 potential exoplanets including 2 in habitable zone. Target of SETI observations.'},
+  {n:'61 Cygni',ra:316.7,dec:38.7,mag:5.20,t:'K5V',sys:'61 Cyg A',dist_ly:11.4,exo:false,notes:'First star (after Sun) to have its distance measured (Bessel, 1838). Binary of two orange dwarfs. 11.4 ly.'},
+  {n:'Epsilon Eridani',ra:53.2,dec:-9.5,mag:3.73,t:'K2V',sys:'ε Eri',dist_ly:10.5,exo:true,notes:'Third nearest naked-eye star. One confirmed exoplanet. Prominent debris disk. Intense stellar activity.'},
+  {n:'Gliese 667C',ra:259.7,dec:-34.9,mag:10.25,t:'M1.5V',sys:'GJ 667C',dist_ly:23.6,exo:true,notes:'7 potential planets, 3 in habitable zone. Part of triple star system (GJ 667 A, B, C).'},
+  {n:'51 Pegasi',ra:344.4,dec:20.8,mag:5.49,t:'G2IV',sys:'51 Peg',dist_ly:50.9,exo:true,notes:'First confirmed exoplanet around sun-like star (1995). Hot Jupiter 51 Peg b (Dimidium), Nobel Prize 2019.'},
+  {n:'HD 209458',ra:330.8,dec:18.9,mag:7.63,t:'G0V',sys:'HD 209458',dist_ly:153,exo:true,notes:'Osiris — first transiting exoplanet detected (1999). Hot Jupiter with evaporating atmosphere detected by Hubble.'},
+  {n:'TRAPPIST-1',ra:346.6,dec:-5.0,mag:18.8,t:'M8V',sys:'2MASS J23062928-0502285',dist_ly:40.7,exo:true,notes:'7 Earth-sized planets — 3 in habitable zone. Record for most habitable-zone exoplanets around a single star.'},
+  {n:'Kepler-452',ra:292.2,dec:44.3,mag:13.7,t:'G2V',sys:'KOI-7016',dist_ly:1400,exo:true,notes:'Kepler-452b called "Earth\'s cousin": similar size, orbital period, host star type. ~6 Gyr old system.'},
+];
+
+// Deep-sky objects — 40 objects
+const DSO=[
+  {n:'Orion Nebula',sh:'M42',ra:83.8,dec:-5.4,t:'H-II',mag:4.0,sz:65,notes:'1,344 ly. Stellar nursery. ~700 young stars including Trapezium cluster. Most photographed nebula.'},
+  {n:'Pleiades',sh:'M45',ra:56.8,dec:24.1,t:'Cluster',mag:1.2,sz:110,notes:'444 ly. Seven Sisters open cluster. ~1,000 stars total. Blue reflection nebulosity around brightest stars.'},
+  {n:'Hercules Cluster',sh:'M13',ra:250.4,dec:36.5,t:'Glob',mag:5.8,sz:20,notes:'22,200 ly. 300,000 stars. Most spectacular globular in northern hemisphere. Arecibo message sent here 1974.'},
+  {n:'Omega Centauri',sh:'NGC 5139',ra:201.7,dec:-47.5,t:'Glob',mag:3.9,sz:36,notes:'17,090 ly. Largest MW globular cluster, 10M stars. Likely nucleus of a dwarf galaxy absorbed by MW.'},
+  {n:'Crab Nebula',sh:'M1',ra:83.6,dec:22.0,t:'SNR',mag:8.4,sz:7,notes:'6,523 ly. Remnant of SN 1054, observed by Chinese astronomers. Powered by Crab Pulsar spinning 30x/sec.'},
+  {n:'Ring Nebula',sh:'M57',ra:283.4,dec:33.0,t:'PN',mag:8.8,sz:1,notes:'2,300 ly. Classic planetary nebula — dying star\'s expelled shell. Central white dwarf 120,000 K.'},
+  {n:'Eagle Nebula',sh:'M16',ra:274.7,dec:-13.8,t:'H-II',mag:6.4,sz:7,notes:'7,000 ly. Pillars of Creation — HST\'s most iconic image. Active star formation within tall gas columns.'},
+  {n:'Lagoon Nebula',sh:'M8',ra:270.9,dec:-24.4,t:'H-II',mag:6.0,sz:90,notes:'5,200 ly. One of the two star-forming nebulae visible to naked eye (with M20). Contains young cluster NGC 6530.'},
+  {n:'Trifid Nebula',sh:'M20',ra:270.6,dec:-23.0,t:'H-II',mag:6.3,sz:28,notes:'5,200 ly. Three-lobed by dark dust lanes. Emission + reflection + dark nebula in single object.'},
+  {n:'Beehive Cluster',sh:'M44',ra:130.1,dec:19.6,t:'Cluster',mag:3.7,sz:95,notes:'610 ly. Praesepe. One of the nearest open clusters. Contains two giant planets in a binary star system.'},
+  {n:'Galactic Centre',sh:'Sgr A*',ra:266.4,dec:-29.0,t:'BH',mag:null,sz:null,notes:'26,000 ly. Supermassive black hole 4.15M solar masses. S-stars orbit with periods as short as 12 years. EHT imaged 2022.'},
+  {n:'47 Tucanae',sh:'NGC 104',ra:6.0,dec:-72.1,t:'Glob',mag:4.0,sz:30.9,notes:'13,700 ly. Second most massive MW globular. ~2M stars. Millisecond pulsars detected. Used for dark matter searches.'},
+  {n:'Eta Carinae Nebula',sh:'NGC 3372',ra:160.9,dec:-59.9,t:'H-II',mag:1.0,sz:120,notes:'7,500 ly. One of the largest diffuse nebulae. Contains Eta Carinae — a hypernova candidate, 5M× solar luminosity.'},
+  {n:'Wild Duck Cluster',sh:'M11',ra:282.8,dec:-6.3,t:'Cluster',mag:5.8,sz:14,notes:'6,200 ly. One of the richest open clusters (~3,000 stars). V-shaped pattern resembles wild ducks in flight.'},
+  {n:'Globular M22',sh:'M22',ra:279.1,dec:-23.9,t:'Glob',mag:5.1,sz:24,notes:'10,600 ly. One of the nearest globulars. Contains two planetary nebulae within it.'},
+  {n:'Tarantula Nebula',sh:'30 Dor',ra:84.7,dec:-69.1,t:'H-II',mag:8.0,sz:40,notes:'160,000 ly (in LMC). Largest and most luminous H-II region known. Contains R136a1 — most massive known star (~300 M☉).'},
+  {n:'Butterfly Nebula',sh:'NGC 6302',ra:259.1,dec:-37.1,t:'PN',mag:9.7,sz:0.8,notes:'3,400 ly. Bug Nebula. Dying star with surface temp ~250,000 K, hottest known central star of planetary nebula.'},
+  {n:'NGC 1499 (California)',sh:'NGC 1499',ra:60.6,dec:36.4,t:'H-II',mag:5.0,sz:145,notes:'1,000 ly. Shaped like California state. Ionised mainly by nearby bright star Xi Persei.'},
+  {n:'Flame Nebula',sh:'NGC 2024',ra:85.4,dec:-1.8,t:'H-II',mag:2.0,sz:30,notes:'1,350 ly. Ionised by Alnitak. Young embedded star cluster at its core. Only visible in infrared through thick dust.'},
+  {n:'Horsehead Nebula',sh:'B33',ra:85.2,dec:-2.5,t:'Dark',mag:null,sz:8,notes:'1,375 ly. Dark nebula silhouetted against emission nebula IC 434. Icon of astronomy photography.'},
+  {n:'Rosette Nebula',sh:'NGC 2237',ra:97.8,dec:4.9,t:'H-II',mag:9.0,sz:80,notes:'5,200 ly. Large H-II region surrounding young cluster NGC 2244. Resembles a rose when imaged in Hα.'},
+  {n:'Veil Nebula',sh:'NGC 6960',ra:312.7,dec:31.7,t:'SNR',mag:7.0,sz:180,notes:'2,100 ly. Cygnus Loop — supernova remnant ~10,000 years old. Spans 3° of sky (~110 ly across).'},
+  {n:'Dumbbell Nebula',sh:'M27',ra:299.9,dec:22.7,t:'PN',mag:7.5,sz:8,notes:'1,360 ly. First planetary nebula discovered (Messier, 1764). Bipolar nebula, apparent size similar to full moon.'},
+  {n:'Omega Nebula',sh:'M17',ra:275.2,dec:-16.2,t:'H-II',mag:6.0,sz:46,notes:'5,500 ly. Swan or Horseshoe Nebula. Active star-forming region in Sagittarius arm. ~35 solar masses of gas.'},
+  {n:'Cat\'s Eye Nebula',sh:'NGC 6543',ra:269.6,dec:66.6,t:'PN',mag:8.1,sz:0.3,notes:'3,300 ly. Complex concentric shells from asymptotic giant branch star. 11 rings of ejected material.'},
+  {n:'Helix Nebula',sh:'NGC 7293',ra:337.4,dec:-20.8,t:'PN',mag:7.6,sz:16,notes:'650 ly. Nearest planetary nebula to Earth. Nicknamed Eye of God. Central star is a white dwarf.'},
+  {n:'Triangulum Nebula',sh:'M33 NGC 604',ra:24.0,dec:30.7,t:'H-II',mag:null,sz:1.5,notes:'2.73 Mly. Giant H-II region in M33. Largest known star-forming nebula — 1,500 ly across, 200× size of Orion Nebula.'},
+  {n:'Antennae Galaxies',sh:'NGC 4038/39',ra:180.5,dec:-18.9,t:'Galaxy',mag:10.7,sz:5.2,notes:'45 Mly. Two galaxies colliding. Strong starburst triggered by interaction. Future appearance of MW-Andromeda collision.'},
+  {n:'Stephan\'s Quintet',sh:'HCG 92',ra:339.0,dec:33.9,t:'Galaxy',mag:13.0,sz:3.5,notes:'280 Mly. Famous compact galaxy group. 4 actually interacting, one is a foreground galaxy. JWST first image target.'},
+  {n:'Cartwheel Galaxy',sh:'ESO 350-40',ra:9.5,dec:-33.7,t:'Galaxy',mag:15.2,sz:1.1,notes:'500 Mly. Ring galaxy formed by head-on collision. Expanding ring of new star formation ~170k ly wide.'},
+  {n:'Coma Cluster',sh:'Abell 1656',ra:194.9,dec:27.9,t:'Cluster',mag:null,sz:120,notes:'330 Mly. Rich galaxy cluster, ~1,000 large galaxies + 30,000 smaller. Fritz Zwicky discovered dark matter here (1933).'},
+  {n:'Perseus Cluster',sh:'Abell 426',ra:49.5,dec:41.5,t:'Cluster',mag:null,sz:90,notes:'240 Mly. One of most massive known. Central galaxy NGC 1275 is active radio source. X-ray sound waves detected.'},
+  {n:'Bullet Cluster',sh:'1E 0657-56',ra:104.6,dec:-55.9,t:'Cluster',mag:null,sz:8,notes:'3.7 Bly. Two galaxy clusters colliding. Strongest direct evidence for dark matter from separation of gas and mass.'},
+  {n:'NGC 7009 (Saturn)',sh:'NGC 7009',ra:320.9,dec:-11.4,t:'PN',mag:8.0,sz:0.4,notes:'2,400 ly. Saturn Nebula — lateral extensions look like Saturn\'s rings through a telescope.'},
+  {n:'Sombrero Nebulosity',sh:'M104 Dust',ra:189.9,dec:-11.6,t:'Dark',mag:null,sz:null,notes:'28 Mly. Prominent equatorial dust lane around Sombrero Galaxy (M104).'},
+  {n:'Pillars of Creation',sh:'M16 Core',ra:274.7,dec:-13.8,t:'Dark',mag:null,sz:0.17,notes:'7,000 ly. Dense gas columns in Eagle Nebula, first imaged by HST 1995. New JWST image 2022 revealed embedded stars.'},
+  {n:'Rho Ophiuchi Cloud',sh:'Rho Oph',ra:246.6,dec:-24.5,t:'Dark',mag:null,sz:4.5,notes:'460 ly. One of the nearest star-forming complexes. Colourful dark and reflection nebulae. JWST first science image target.'},
+  {n:'Coal Sack',sh:'Coal Sack',ra:190.0,dec:-62.0,t:'Dark',mag:null,sz:300,notes:'600 ly. Dark molecular cloud in Southern Cross. Visible to naked eye as dark void in the Milky Way.'},
+  {n:'Cygnus X-1',sh:'HDE 226868',ra:299.6,dec:35.2,t:'BH',mag:8.9,sz:null,notes:'6,100 ly. First confirmed black hole (1972). 21M☉, accretes from companion supergiant. Strong X-ray source.'},
+  {n:'SS 433',sh:'SS 433',ra:287.9,dec:4.9,t:'BH',mag:14.0,sz:null,notes:'18,000 ly. Microquasar: black hole + companion star. Relativistic jets at 26% speed of light in opposite directions.'},
+];
+
+// Constellations — all 18 major ones with full boundary data
+const CONS=[
+  {n:'Orion',ra:83.8,dec:5.4,maj:true,min_lod:2.0,ln:[[82,6],[83,-0.3],[80.4,2],[81.2,-1.2],[84,-1.2],[85,2],[83.5,9.9],[88.8,7.4],[85.2,6.4],[83,0.2],[80.4,2]]},
+  {n:'Ursa Major',ra:165,dec:56,maj:true,min_lod:2.0,ln:[[165.9,61.8],[163.4,57],[161,56.4],[158,55.9],[154.9,56.4],[152,58.1],[149.5,51.7],[150.1,54.9],[153.7,53.7],[156.3,57],[158,55.9]]},
+  {n:'Cassiopeia',ra:12,dec:60,maj:true,min_lod:2.0,ln:[[1.4,59.1],[9.2,59],[14.2,60.7],[21,60.2],[28.6,63.7]]},
+  {n:'Scorpius',ra:255,dec:-26,maj:true,min_lod:2.0,ln:[[247.4,-26.4],[252.2,-19.8],[253.5,-22.6],[255,-25.6],[255.5,-28.2],[259.2,-30.1],[263.4,-37.1],[264.3,-43],[265,-39],[266.9,-40.1],[271.5,-40.5]]},
+  {n:'Cygnus',ra:310,dec:45,maj:true,min_lod:2.0,ln:[[305.6,40.3],[310.4,45.3],[315,40.7],[313,36.7],[308.8,30.2],[310.4,45.3],[305.6,56.5]]},
+  {n:'Sagittarius',ra:285,dec:-28,maj:true,min_lod:2.0,ln:[[275.2,-21.1],[277.9,-24.4],[280,-20.6],[282.5,-25.4],[283.8,-29.8],[285.7,-26.3],[287.2,-21],[284,-18.2]]},
+  {n:'Centaurus',ra:210,dec:-47,maj:true,min_lod:2.0,ln:[[201,-42.2],[210.5,-47.2],[218.9,-42.7],[219.4,-60.8],[213.9,-47.3]]},
+  {n:'Leo',ra:155,dec:15,maj:false,min_lod:2.5,ln:[[148.2,19.8],[151.8,12.9],[154.2,11.9],[155,15.4],[158.3,14.6],[163.3,19.8],[168.6,15.4]]},
+  {n:'Gemini',ra:112,dec:24,maj:false,min_lod:2.5,ln:[[109.3,20.6],[111.8,16.5],[113.6,31.9],[116.3,28.0],[112,28],[116.2,24.4],[113.5,22.5]]},
+  {n:'Virgo',ra:198,dec:-11,maj:false,min_lod:2.5,ln:[[185.3,-10.3],[190.4,-11.2],[198,-11.2],[201.3,-11.2],[205.6,-11.2]]},
+  {n:'Lyra',ra:284,dec:37,maj:false,min_lod:2.5,ln:[[284.7,38.8],[282.5,32.7],[286.5,32.7],[284.7,38.8],[285.7,43.9]]},
+  {n:'Perseus',ra:51,dec:49,maj:false,min_lod:2.5,ln:[[48.5,40],[50.4,47],[51.1,49.9],[52.3,49.8],[54.5,50.4],[59.7,50.4]]},
+  {n:'Andromeda',ra:8,dec:37,maj:false,min_lod:2.5,ln:[[0.1,29.1],[2.1,29.1],[10,35.6],[17.5,35.6],[28,42.3]]},
+  {n:'Taurus',ra:67,dec:17,maj:false,min_lod:2.5,ln:[[68.5,16.5],[65,15.6],[63.5,16.5],[69.1,18],[84.5,21.1],[83.6,22]]},
+  {n:'Canis Major',ra:101,dec:-22,maj:false,min_lod:2.5,ln:[[101.3,-16.7],[95.7,-17.9],[99.4,-17],[101.5,-28.5],[105,-16.7],[107,-26.4]]},
+  {n:'Boötes',ra:214,dec:27,maj:false,min_lod:3.0,ln:[[213.9,19.2],[214,27.1],[218,33.3],[210,38.3],[206.8,49.3]]},
+  {n:'Auriga',ra:80,dec:43,maj:false,min_lod:3.0,ln:[[74.2,33.2],[76,41.2],[79.2,45.9],[89.9,44.9],[88.5,37.2],[79.2,45.9]]},
+  {n:'Aquila',ra:297,dec:8,maj:false,min_lod:3.0,ln:[[293,10.6],[298.8,8.9],[303.4,10.2],[300.5,2.8],[296,-0.8]]},
+  {n:'Crux',ra:187,dec:-60,maj:true,min_lod:2.5,ln:[[186.6,-63.1],[187.8,-57.1],[191.9,-59.7],[186.6,-63.1],[183.8,-57.0]]},
+  {n:'Ursa Minor',ra:230,dec:77,maj:false,min_lod:3.0,ln:[[37.9,89.3],[222.7,74.2],[236,77.8],[217.4,86.5],[37.9,89.3]]},
+  {n:'Ophiuchus',ra:263,dec:4,maj:false,min_lod:3.0,ln:[[263.7,12.6],[258,4.4],[259.1,-16],[265,-21],[270,-3],[263.7,12.6]]},
+  {n:'Corona Borealis',ra:234,dec:28,maj:false,min_lod:4.0,ln:[[233.7,26.7],[234,29.1],[237,31.4],[239,30],[240,26],[237,22],[233.7,26.7]]},
+];
+
+// ════════════════════════════════════════════════════════════════
+// COORDINATE MATH
+// ════════════════════════════════════════════════════════════════
+function toXY(ra,dec){
+  const cx=W/2,cy=H/2,sc=Math.min(W,H)/195*zoom;
+  return{x:cx+((ra-180)*sc*1.75)+panX,y:cy+(dec*-sc*1.75)+panY};
+}
+function xyToRD(x,y){
+  const cx=W/2,cy=H/2,sc=Math.min(W,H)/195*zoom;
+  return{ra:(((x-cx-panX)/(sc*1.75))+180+720)%360,dec:Math.max(-90,Math.min(90,-((y-cy-panY)/(sc*1.75))))};
+}
+function fmtRA(ra){const h=Math.floor(ra/15),m=Math.floor((ra%15)/15*60),s=Math.floor(((ra%15)/15*60-m)*60);return`${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`}
+function fmtDec(d){const sg=d>=0?'+':'−',g=Math.floor(Math.abs(d)),mn=Math.floor((Math.abs(d)-g)*60),sc2=Math.floor(((Math.abs(d)-g)*60-mn)*60);return`${sg}${String(g).padStart(2,'0')}° ${String(mn).padStart(2,'0')}′ ${String(sc2).padStart(2,'0')}″`}
+function inView(x,y,pad=30){return x>-pad&&x<W+pad&&y>-pad&&y<H+pad}
+
+// ════════════════════════════════════════════════════════════════
+// LOD SYSTEM
+// ════════════════════════════════════════════════════════════════
+function getLOD(){
+  for(let i=0;i<LOD_BREAKS.length;i++){if(zoom<LOD_BREAKS[i])return i}
+  return LOD_BREAKS.length;
+}
+function updateHUD(){
+  const lod=getLOD();
+  if(lod!==currentLOD){
+    currentLOD=lod;
+    // Update legend visibility
+    const lgShow=['leg-mw','leg-m31','leg-other','leg-nearby'];
+    const conShow=['leg-con','leg-glob','leg-neb'];
+    const deepShow=['leg-bh','leg-exo'];
+    document.querySelectorAll('.leg-item').forEach(el=>el.classList.remove('vis'));
+    if(lod<=1)lgShow.forEach(id=>document.getElementById(id)?.classList.add('vis'));
+    if(lod>=2)conShow.forEach(id=>document.getElementById(id)?.classList.add('vis'));
+    if(lod>=3)[...lgShow.slice(0,2),...conShow,...deepShow].forEach(id=>document.getElementById(id)?.classList.add('vis'));
+    if(lod>=4)deepShow.forEach(id=>document.getElementById(id)?.classList.add('vis'));
+  }
+  // Pips
+  for(let i=0;i<10;i++){const p=document.getElementById(`p${i}`);if(p)p.classList.toggle('active',i<=lod)}
+  document.getElementById('lod-name').textContent=LOD_NAMES[Math.min(lod,10)];
+  document.getElementById('zoom-val').textContent=zoom>=1000?`${(zoom/1000).toFixed(1)}k×`:zoom.toFixed(1)+'×';
+  const hints=['','','','','scroll to reveal more stars','AI deep field loading…','','zoom into a star for its system','zoom in to see planets','zoom in for planet detail',''];
+  const hint=document.getElementById('zoom-hint');
+  if(hint)hint.textContent=hints[Math.min(lod,10)]||'';
+  // Scale bar
+  const scales=[[5,'Mly'],[2,'Mly'],[500,'kly'],[100,'kly'],[50,'kly'],[10,'kly'],[5,'kly'],[1,'kly'],[100,'ly'],[10,'ly'],[1,'ly']];
+  const [sv,su]=scales[Math.min(lod,10)];
+  const sc=Math.min(W,H)/195*zoom;
+  const px=sv*(su==='Mly'?1e6:1e3)/3.26156/9.461e12*sc*1.75; // rough
+  const barW=Math.min(80,Math.max(30,px));
+  document.getElementById('scale-line').style.width=barW+'px';
+  document.getElementById('scale-label').textContent=`${sv} ${su}`;
+}
+
+// ════════════════════════════════════════════════════════════════
+// STAR HELPERS
+// ════════════════════════════════════════════════════════════════
+const STAR_CLR={O:'#b0e0ff',B:'#cceeff',A:'#ffffff',F:'#fff8d8',G:'#ffee80',K:'#ffaa44',M:'#ff6633'};
+function sColor(t){return STAR_CLR[t?t[0]:'A']||'#fff'}
+function sRadius(mag,z){return Math.max(0.6,3.8-mag*0.65)*Math.min(1.5,Math.sqrt(z)*0.55)}
+
+// ════════════════════════════════════════════════════════════════
+// INFINITE PROCEDURAL STAR FIELD (tile-based seeded PRNG)
+// Each sky tile generates its own seeded stars — infinite zoom support
+// ════════════════════════════════════════════════════════════════
+function tileHash(tx,ty,depth){
+  let h=0x811c9dc5^(depth*2654435761);
+  h=(h^(tx+32768))*0x01000193;h=(h^(ty+32768))*0x01000193;
+  return(h>>>0);
+}
+function lcg(seed){let s=seed;return()=>{s=(1664525*s+1013904223)&0xffffffff;return(s>>>0)/0xffffffff}}
+
+// Get stars for a given sky tile at a given depth level (depth=0: sparse, depth++: denser)
+const _tileCache={};
+function getTileStars(tx,ty,depth){
+  const key=`${tx}_${ty}_${depth}`;
+  if(_tileCache[key])return _tileCache[key];
+  const seed=tileHash(tx,ty,depth);
+  const rng=lcg(seed);
+  const counts=[0,0,0,0,400,700,1000,1500,2000,3000,5000];
+  const n=Math.floor((counts[Math.min(depth,10)]||400)*(0.6+rng()*0.8)/100);
+  const stars=[];
+  const tileSize=getTileSize(depth);
+  for(let i=0;i<n;i++){
+    const ra=(tx+rng())*tileSize;
+    const dec=(ty+rng()-0.5)*tileSize*0.5;
+    if(dec<-90||dec>90)continue;
+    const mag=10+rng()*8; // faint stars
+    const type=['O','B','A','F','G','K','M'][Math.floor(rng()*7)];
+    stars.push({ra,dec,mag,type,bright:rng()});
+  }
+  if(Object.keys(_tileCache).length>500){
+    const firstKey=Object.keys(_tileCache)[0];
+    delete _tileCache[firstKey];
+  }
+  _tileCache[key]=stars;
+  return stars;
+}
+function getTileSize(depth){
+  // Tile covers fewer degrees as depth increases
+  return Math.max(0.001,360/(4*Math.pow(2,depth-4)));
+}
+function getVisibleTiles(lod){
+  if(lod<4)return[];
+  const depth=Math.min(10,lod);
+  const tileSize=getTileSize(depth);
+  const{ra:cRA,dec:cDec}=xyToRD(W/2,H/2);
+  // How many degrees is the viewport?
+  const sc=Math.min(W,H)/195*zoom;
+  const viewRA=W/(sc*1.75);
+  const viewDec=H/(sc*1.75);
+  const tiles=[];
+  const minRA=cRA-viewRA/2-tileSize;
+  const maxRA=cRA+viewRA/2+tileSize;
+  const minDec=Math.max(-90,cDec-viewDec/2-tileSize);
+  const maxDec=Math.min(90,cDec+viewDec/2+tileSize);
+  for(let ra=Math.floor(minRA/tileSize);ra<=Math.ceil(maxRA/tileSize);ra++){
+    for(let dec=Math.floor(minDec/tileSize);dec<=Math.ceil(maxDec/tileSize);dec++){
+      tiles.push({tx:ra,ty:dec,depth});
+    }
+  }
+  return tiles.slice(0,100); // safety cap
+}
+
+// Static background stars for low LOD (kept for performance)
+const bgRand=(()=>{let s=0x12345678;const r=()=>{s=(s^(s<<13))&0xffffffff;s=(s^(s>>>7))&0xffffffff;s=(s^(s<<17))&0xffffffff;return(s>>>0)/0xffffffff};return r})();
+const BG_STARS=(()=>{const a=[];for(let i=0;i<1200;i++)a.push([bgRand()*360,(bgRand()-0.5)*180,bgRand()*0.9]);return a})();
+
+// ════════════════════════════════════════════════════════════════
+// GALAXY COLORS
+// ════════════════════════════════════════════════════════════════
+function gColor(g){return{MW:'#7ec8e3',M31:'#b8a0f0',M33:'#70d8b0',Other:'#a0c870',Nearby:'#f0a840'}[g]||'#aaa'}
+function gTypeLabel(t){if(!t)return'Unknown';if(t.includes('dSph'))return'Dwarf Spheroidal';if(t.includes('dIrr')||t==='Irr')return'Dwarf Irregular';if(t.includes('dE'))return'Dwarf Elliptical';if(t.includes('SB'))return'Barred Spiral';if(t.includes('SA(s)b')||t.includes('SA(s)a'))return'Spiral';if(t.includes('SA')||t.includes('S'))return'Spiral';if(t.includes('E'))return'Elliptical';return t}
+
+// ════════════════════════════════════════════════════════════════
+// AI DEEP FIELD FETCH
+// ════════════════════════════════════════════════════════════════
+async function fetchDeepField(ra,dec,radius){
+  const key=`${Math.round(ra)}_${Math.round(dec)}_${Math.round(radius)}`;
+  if(aiCache[key])return aiCache[key];
+  if(aiFetching.has(key))return null;
+  aiFetching.add(key);
+  document.getElementById('ai-status').style.display='block';
+  try{
+    const prompt=`You are an astronomical database. Return ONLY valid JSON, no markdown, no explanation.
+Return exactly 8–12 deep-field objects visible in a sky region centered at RA ${ra.toFixed(1)}°, Dec ${dec.toFixed(1)}°, radius ${radius.toFixed(1)}°.
+Include faint galaxies (mag 11–17), faint nebulae, interesting stars, double stars, and variable stars real objects from this region.
+JSON format (array of objects):
+[{"n":"Name","sh":"Short name","ra":123.4,"dec":12.3,"t":"Galaxy|Nebula|Star|Double Star|Variable","mag":12.5,"notes":"One sentence of real astronomical detail"}]
+Only include real astronomical objects. Use accurate RA/Dec coordinates.`;
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:prompt}]})});
+    const data=await resp.json();
+    const text=data.content?.find(c=>c.type==='text')?.text||'[]';
+    const clean=text.replace(/```json\n?/g,'').replace(/```/g,'').trim();
+    const objs=JSON.parse(clean);
+    aiCache[key]=objs;
+    aiFetching.delete(key);
+    document.getElementById('ai-status').style.display='none';
+    needsDraw=true;
+    return objs;
+  }catch(e){
+    aiFetching.delete(key);
+    document.getElementById('ai-status').style.display='none';
+    aiCache[key]=[];
+    return[];
+  }
+}
+
+let lastAIFetch=0;
+function maybeAIFetch(){
+  const lod=getLOD();
+  if(lod<5)return;
+  const now=Date.now();
+  if(now-lastAIFetch<2000)return;
+  lastAIFetch=now;
+  const{ra,dec}=xyToRD(W/2,H/2);
+  // Scale radius to zoom level — deeper zoom = smaller search area
+  const radius=lod>=9?0.1:lod>=8?0.5:lod>=7?1.5:lod>=6?3:8;
+  fetchDeepField(ra,dec,radius);
+
+  // At LOD 7+, also try to fetch planet data for nearby stars
+  if(lod>=7){
+    for(const s of STARS){
+      if(s.exo&&!aiPlanetCache[s.n]&&!aiFetching.has('planets_'+s.n)){
+        const p=toXY(s.ra,s.dec);
+        if(Math.hypot(p.x-W/2,p.y-H/2)<W*0.35){
+          fetchPlanets(s);
+          break; // one at a time
+        }
+      }
+    }
+  }
+}
+
+async function fetchPlanets(star){
+  const key='planets_'+star.n;
+  if(aiPlanetCache[star.n]||aiFetching.has(key))return;
+  aiFetching.add(key);
+  document.getElementById('ai-status').style.display='block';
+  try{
+    const prompt=`You are an astronomical database. Return ONLY valid JSON, no markdown.
+List the known or plausible exoplanets for the star ${star.n} (${star.sys}, spectral type ${star.t}, ${star.dist_ly} ly away).
+Return an array of planet objects:
+[{"n":"Planet name","dist":0.5,"r":2.5,"col":"#4090e0","notes":"One sentence description"}]
+Where dist is distance from star in AU (use real data if known, else estimate), r is visual radius (1-8 scale), col is a hex color representing the planet type.
+Include 2-6 planets maximum. Only real or plausible planets based on known data.`;
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:500,messages:[{role:'user',content:prompt}]})});
+    const data=await resp.json();
+    const text=data.content?.find(c=>c.type==='text')?.text||'[]';
+    const clean=text.replace(/```json\n?/g,'').replace(/```/g,'').trim();
+    const planets=JSON.parse(clean);
+    // Prepend the star itself
+    aiPlanetCache[star.n]=[{n:star.n,dist:0,r:6,col:sColor(star.t),glow:'rgba(255,200,100,0.3)',type:'star',notes:star.notes||''},...planets];
+    aiFetching.delete(key);
+    document.getElementById('ai-status').style.display='none';
+    needsDraw=true;
+  }catch(e){
+    aiFetching.delete(key);
+    aiPlanetCache[star.n]=[{n:star.n,dist:0,r:6,col:sColor(star.t),glow:'rgba(255,200,100,0.3)',type:'star'}];
+    document.getElementById('ai-status').style.display='none';
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// DRAW LAYERS
+// ════════════════════════════════════════════════════════════════
+function drawBg(){
+  ctx.fillStyle='#000409';
+  ctx.fillRect(0,0,W,H);
+  // Subtle vignette
+  const vg=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.7);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,3,12,0.5)');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+}
+
+function drawBgStars(lod){
+  ctx.save();
+  const density=lod<2?300:lod<3?600:lod<4?900:1200;
+  for(let i=0;i<Math.min(density,BG_STARS.length);i++){
+    const[ra,dec,bright]=BG_STARS[i];
+    const{x,y}=toXY(ra,dec);
+    if(!inView(x,y,2))continue;
+    const alpha=0.12+bright*0.55,r=bright*0.75;
+    ctx.fillStyle=`rgba(255,255,255,${alpha.toFixed(2)})`;
+    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawGrid(lod){
+  if(lod<2)return;
+  ctx.save();
+  ctx.strokeStyle='rgba(126,200,227,0.06)';ctx.lineWidth=0.5;
+  const fs=Math.max(8,Math.min(10,W/80));
+  ctx.font=`${fs}px 'Courier New'`;ctx.fillStyle='rgba(126,200,227,0.22)';
+  let rs=30,ds=30;
+  if(lod>=3)rs=ds=15;if(lod>=4)rs=ds=5;if(lod>=5)rs=ds=2;if(lod>=6)rs=ds=1;
+  for(let d=-90;d<=90;d+=ds){
+    ctx.beginPath();
+    for(let r=0;r<=360;r+=2){const{x,y}=toXY(r,d);r===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
+    ctx.stroke();
+    const m=toXY(180,d);
+    if(m.y>8&&m.y<H-8)ctx.fillText(`${d>=0?'+':''}${d}°`,Math.max(4,m.x),m.y-2);
+  }
+  for(let r=0;r<360;r+=rs){
+    ctx.beginPath();
+    for(let d=-90;d<=90;d+=2){const{x,y}=toXY(r,d);d===-90?ctx.moveTo(x,y):ctx.lineTo(x,y)}
+    ctx.stroke();
+    const m=toXY(r,0);
+    if(m.x>20&&m.x<W-20)ctx.fillText(`${Math.floor(r/15)}h`,m.x+2,m.y+fs+1);
+  }
+  ctx.restore();
+}
+
+function drawMilkyWay(lod){
+  if(lod<1.5)return;
+  ctx.save();
+  // Main band
+  for(let pass=0;pass<2;pass++){
+    const pts=[];
+    for(let r=0;r<=361;r+=3){
+      const offset=pass===0?0:8;
+      const d=25*Math.sin((r-266)*Math.PI/180)-5*Math.cos((r-100)*Math.PI/90)+offset;
+      pts.push(toXY(r,d));
+    }
+    for(let w=pass===0?70:40;w>=6;w-=9){
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+      for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);
+      const a=(pass===0?0.016:0.01)+(70-w)*0.0015;
+      ctx.strokeStyle=`rgba(160,175,255,${a.toFixed(4)})`;
+      ctx.lineWidth=w*zoom*(pass===0?0.52:0.3);ctx.stroke();
+    }
+  }
+  // Galactic bulge
+  const c=toXY(266,-29);
+  const bg=ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,55*zoom);
+  bg.addColorStop(0,'rgba(255,210,130,0.14)');bg.addColorStop(0.4,'rgba(200,160,255,0.07)');bg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=bg;ctx.beginPath();ctx.arc(c.x,c.y,55*zoom,0,Math.PI*2);ctx.fill();
+  // LMC/SMC glows at high zoom
+  if(lod>=1.5){
+    [{ra:80.9,dec:-69.8,r:12,col:'rgba(180,200,255,0.09)'},{ra:16,dec:-72.8,r:7,col:'rgba(160,180,255,0.07)'}].forEach(({ra,dec,r,col})=>{
+      const p=toXY(ra,dec);
+      const g2=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,r*zoom);
+      g2.addColorStop(0,col);g2.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=g2;ctx.beginPath();ctx.arc(p.x,p.y,r*zoom,0,Math.PI*2);ctx.fill();
+    });
+  }
+  ctx.restore();
+}
+
+function drawConstellations(lod){
+  if(lod<2.0)return;
+  ctx.save();
+  const fs=Math.max(8,Math.min(11,W/65));
+  for(const c of CONS){
+    if(lod<c.min_lod)continue;
+    const alpha=Math.min(0.35,0.1+(lod-c.min_lod)*0.08);
+    ctx.strokeStyle=`rgba(100,148,220,${alpha})`;
+    ctx.lineWidth=0.7;ctx.setLineDash([3,6]);
+    ctx.beginPath();
+    c.ln.forEach((p,i)=>{const{x,y}=toXY(p[0],p[1]);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});
+    ctx.stroke();ctx.setLineDash([]);
+    // Label at LOD >= min
+    const{x,y}=toXY(c.ra,c.dec);
+    if(!inView(x,y))continue;
+    ctx.font=`${fs}px 'Courier New'`;
+    ctx.fillStyle=`rgba(140,178,255,${Math.min(0.65,0.2+(lod-c.min_lod)*0.15)})`;
+    ctx.fillText(c.n.toUpperCase(),x,y);
+  }
+  ctx.restore();
+}
+
+function drawNamedStars(lod){
+  if(lod<1.8)return;
+  ctx.save();
+  // Magnitude cutoff scales with LOD
+  const magThresh=lod<2.5?0.5:lod<3?1.5:lod<4?2.5:lod<5?3.5:lod<6?4.5:12;
+  const labelThresh=lod<2.5?0.1:lod<3?1.0:lod<4?2.0:lod<5?3.0:lod<6?4.0:6;
+  const exoVisible=lod>=4;
+  for(const s of STARS){
+    if(s.mag>magThresh)continue;
+    const{x,y}=toXY(s.ra,s.dec);
+    if(!inView(x,y,10))continue;
+    const r=sRadius(s.mag,zoom),col=sColor(s.t);
+    // Glow
+    const grd=ctx.createRadialGradient(x,y,0,x,y,r*3.5);
+    grd.addColorStop(0,col+'bb');grd.addColorStop(0.5,col+'33');grd.addColorStop(1,'transparent');
+    ctx.fillStyle=grd;ctx.beginPath();ctx.arc(x,y,r*3.5,0,Math.PI*2);ctx.fill();
+    // Core
+    ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+    // Diffraction spikes for bright stars
+    if(s.mag<0.5&&lod>=2){
+      ctx.strokeStyle=col+'55';ctx.lineWidth=0.5;
+      ctx.beginPath();ctx.moveTo(x-r*5,y);ctx.lineTo(x+r*5,y);ctx.moveTo(x,y-r*5);ctx.lineTo(x,y+r*5);ctx.stroke();
+    }
+    // Exoplanet marker
+    if(exoVisible&&s.exo){
+      ctx.strokeStyle='rgba(80,255,160,0.7)';ctx.lineWidth=0.7;
+      ctx.beginPath();ctx.arc(x,y,r+3.5,0,Math.PI*2);ctx.stroke();
+    }
+    // Label
+    if(s.mag<=labelThresh){
+      const fs2=Math.max(8,Math.min(10,W/75));
+      ctx.font=`${fs2}px 'Courier New'`;
+      ctx.fillStyle=`rgba(255,255,210,${Math.min(0.9,0.5+(lod-2)*0.1)})`;
+      ctx.fillText(s.n,x+r+4,y+4);
+      if(lod>=5){
+        ctx.font=`${Math.max(7,fs2-1)}px 'Courier New'`;
+        ctx.fillStyle='rgba(255,255,210,0.45)';
+        ctx.fillText(`${s.dist_ly<100?s.dist_ly.toFixed(1):Math.round(s.dist_ly)} ly`,x+r+4,y+13);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function drawDSO(lod){
+  if(lod<2.5)return;
+  ctx.save();
+  const magThresh=lod<3?5:lod<4?8:lod<5?11:lod<6?14:18;
+  const fs=Math.max(8,Math.min(10,W/75));
+  for(const o of DSO){
+    if(o.mag&&o.mag>magThresh)continue;
+    if(!o.mag&&lod<4)continue; // only show no-mag objects at high zoom
+    const{x,y}=toXY(o.ra,o.dec);
+    if(!inView(x,y,20))continue;
+    const sz=Math.max(4,lod>=4?8:5);
+    ctx.save();ctx.translate(x,y);
+    switch(o.t){
+      case'Glob':
+        ctx.strokeStyle='rgba(255,200,80,0.8)';ctx.lineWidth=0.8;
+        ctx.beginPath();ctx.arc(0,0,sz,0,Math.PI*2);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(-sz,0);ctx.lineTo(sz,0);ctx.moveTo(0,-sz);ctx.lineTo(0,sz);ctx.stroke();
+        if(lod>=5){ctx.fillStyle='rgba(255,200,80,0.08)';ctx.beginPath();ctx.arc(0,0,sz,0,Math.PI*2);ctx.fill()}
+        break;
+      case'Cluster':
+        ctx.strokeStyle='rgba(80,220,160,0.8)';ctx.lineWidth=0.8;
+        ctx.beginPath();ctx.arc(0,0,sz,0,Math.PI*2);ctx.stroke();
+        if(lod>=4){[[-sz*0.5,-sz*0.8],[sz*0.5,-sz*0.8],[sz,0],[sz*0.5,sz*0.8],[-sz*0.5,sz*0.8],[-sz,0]].forEach(([dx,dy],i)=>{ctx.fillStyle='rgba(80,220,160,0.7)';ctx.beginPath();ctx.arc(dx,dy,0.8,0,Math.PI*2);ctx.fill()})}
+        break;
+      case'H-II':case'PN':case'SNR':
+        const nc={'H-II':'rgba(80,200,255,0.75)','PN':'rgba(160,120,255,0.75)','SNR':'rgba(255,140,80,0.75)'}[o.t];
+        ctx.strokeStyle=nc;ctx.lineWidth=0.8;
+        if(o.t==='PN'){ctx.beginPath();ctx.ellipse(0,0,sz*1.2,sz*0.7,0,0,Math.PI*2);ctx.stroke();}
+        else{ctx.strokeRect(-sz,-sz*0.7,sz*2,sz*1.4);}
+        if(lod>=5&&o.sz&&o.sz>5){ctx.fillStyle=nc.replace('0.75','0.06');ctx.fillRect(-sz,-sz*0.7,sz*2,sz*1.4)}
+        break;
+      case'Dark':
+        ctx.strokeStyle='rgba(160,140,100,0.5)';ctx.lineWidth=0.7;ctx.setLineDash([2,3]);
+        ctx.strokeRect(-sz,-sz*0.7,sz*2,sz*1.4);ctx.setLineDash([]);
+        break;
+      case'BH':case'AGN':
+        ctx.strokeStyle='rgba(255,70,70,0.9)';ctx.lineWidth=1;
+        ctx.beginPath();ctx.arc(0,0,sz*0.75,0,Math.PI*2);ctx.stroke();
+        ctx.fillStyle='rgba(255,70,70,0.2)';ctx.beginPath();ctx.arc(0,0,sz*0.4,0,Math.PI*2);ctx.fill();
+        if(lod>=4){ctx.strokeStyle='rgba(255,70,70,0.35)';ctx.lineWidth=0.5;ctx.beginPath();ctx.arc(0,0,sz*1.4,0,Math.PI*2);ctx.stroke()}
+        break;
+      case'Galaxy':
+        ctx.strokeStyle='rgba(200,160,255,0.75)';ctx.lineWidth=0.8;
+        ctx.beginPath();ctx.ellipse(0,0,sz*1.1,sz*0.45,Math.PI/4,0,Math.PI*2);ctx.stroke();
+        break;
+      default:
+        ctx.strokeStyle='rgba(180,220,255,0.6)';ctx.lineWidth=0.6;
+        ctx.beginPath();ctx.arc(0,0,sz*0.6,0,Math.PI*2);ctx.stroke();
+    }
+    ctx.restore();
+    // Labels
+    ctx.font=`${fs}px 'Courier New'`;
+    ctx.fillStyle='rgba(160,210,255,0.7)';ctx.fillText(o.sh,x+sz+4,y+4);
+    if(lod>=4){ctx.fillStyle='rgba(160,210,255,0.4)';ctx.font=`${Math.max(7,fs-1)}px 'Courier New'`;ctx.fillText(o.n,x+sz+4,y+13)}
+    if(lod>=5&&o.mag){ctx.fillStyle='rgba(160,210,255,0.3)';ctx.fillText(`mag ${o.mag.toFixed(1)}`,x+sz+4,y+22)}
+  }
+  ctx.restore();
+}
+
+function drawGalaxies(lod){
+  if(lod>4.0)return;
+  ctx.save();
+  const fs=Math.max(8,Math.min(11,W/68));
+  for(const g of GALAXIES){
+    const{x,y}=toXY(g.ra,g.dec);
+    if(!inView(x,y,40))continue;
+    const col=gColor(g.group);
+    const isMW=g.n==='Milky Way';
+    const isDwarf=g.type&&(g.type.includes('dS')||g.type.includes('dI')||g.type.includes('dE')||!g.diam);
+    const distMly=g.dist<0.001?0:g.dist;
+    // Filter by zoom level — dwarfs only visible at higher zoom
+    if(lod<0.8&&isDwarf&&distMly>0.3)continue;
+    if(lod<0.6&&isDwarf)continue;
+    if(lod<0.5&&distMly>5)continue;
+
+    if(isMW){
+      // MW as glowing barred ellipse
+      const r=lod<1?18:lod<2?24:28;
+      const mg=ctx.createRadialGradient(x,y,0,x,y,r);
+      mg.addColorStop(0,'rgba(255,220,150,0.18)');mg.addColorStop(0.5,'rgba(180,160,255,0.10)');mg.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=mg;ctx.beginPath();ctx.ellipse(x,y,r*1.8,r*0.65,0.5,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='rgba(255,220,180,0.5)';ctx.lineWidth=0.8;
+      ctx.beginPath();ctx.ellipse(x,y,r,r*0.38,0.5,0,Math.PI*2);ctx.stroke();
+      // Bar
+      ctx.strokeStyle='rgba(255,210,150,0.25)';ctx.lineWidth=r*0.18;
+      ctx.beginPath();const ang=0.5;
+      ctx.moveTo(x-r*0.5*Math.cos(ang),y-r*0.5*Math.sin(ang));
+      ctx.lineTo(x+r*0.5*Math.cos(ang),y+r*0.5*Math.sin(ang));ctx.stroke();
+      ctx.lineWidth=0.8;
+      ctx.font=`${Math.max(9,fs+1)}px 'Courier New'`;ctx.fillStyle='rgba(255,220,150,0.9)';ctx.fillText('MILKY WAY',x+r+3,y+5);
+      if(lod>=1){ctx.font=`${Math.max(7,fs-1)}px 'Courier New'`;ctx.fillStyle='rgba(255,220,150,0.55)';ctx.fillText('(our galaxy)',x+r+3,y+14)}
+      continue;
+    }
+
+    const r=g.diam?Math.max(3,Math.min(18,g.diam/9*(lod<1?0.4:0.7))):3;
+
+    // Draw galaxy morphology
+    ctx.strokeStyle=col;ctx.lineWidth=lod>=2?0.9:0.7;
+    if(g.type&&g.type.match(/SA|SB/)){
+      // Spiral
+      ctx.save();ctx.translate(x,y);
+      const angle=(g.ra*0.1)%Math.PI;
+      ctx.beginPath();ctx.ellipse(0,0,r,r*0.35,angle,0,Math.PI*2);ctx.stroke();
+      if(lod>=2&&r>5){
+        ctx.strokeStyle=col+'55';ctx.lineWidth=0.5;
+        ctx.beginPath();ctx.ellipse(0,0,r*0.5,r*0.18,angle,0,Math.PI*2);ctx.stroke();
+      }
+      ctx.restore();
+    }else if(g.type&&g.type.match(/E[0-9]/)){
+      // Elliptical
+      ctx.beginPath();ctx.ellipse(x,y,r,r*0.7,0,0,Math.PI*2);ctx.stroke();
+    }else{
+      // Dwarf/Irregular
+      if(!g.diam){
+        ctx.fillStyle=col+'88';ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();
+      }else{
+        ctx.beginPath();ctx.ellipse(x,y,r,r*0.55,0.3,0,Math.PI*2);ctx.stroke();
+        if(lod>=2){ctx.fillStyle=col+'15';ctx.beginPath();ctx.ellipse(x,y,r,r*0.55,0.3,0,Math.PI*2);ctx.fill()}
+      }
+    }
+    // Labels
+    const showLabel=!isDwarf||lod>=1.0||(isDwarf&&distMly<0.5);
+    if(showLabel){
+      ctx.font=`${fs}px 'Courier New'`;
+      ctx.fillStyle=col+(isDwarf?'99':'cc');
+      ctx.fillText(g.n,x+r+5,y+4);
+      if(lod>=0.8){
+        ctx.font=`${Math.max(7,fs-2)}px 'Courier New'`;
+        ctx.fillStyle=col+'66';
+        ctx.fillText(distMly<0.001?'(our galaxy)':distMly<0.1?`${Math.round(distMly*1000)}k ly`:`${distMly.toFixed(3)} Mly`,x+r+5,y+13);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function drawAIObjects(lod){
+  if(lod<5)return;
+  const{ra,dec}=xyToRD(W/2,H/2);
+  const radius=lod>=6?3:8;
+  const key=`${Math.round(ra)}_${Math.round(dec)}_${Math.round(radius)}`;
+  const objs=aiCache[key];
+  if(!objs||!objs.length)return;
+  ctx.save();
+  const fs=Math.max(8,Math.min(9,W/80));
+  for(const o of objs){
+    const{x,y}=toXY(o.ra,o.dec);
+    if(!inView(x,y,15))continue;
+    ctx.font=`${fs}px 'Courier New'`;
+    const col=o.t==='Galaxy'?'rgba(200,160,255,0.65)':o.t==='Nebula'?'rgba(80,200,255,0.65)':o.t==='Star'?'rgba(255,255,200,0.65)':'rgba(180,220,180,0.65)';
+    ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,2,0,Math.PI*2);ctx.fill();
+    ctx.fillText(o.sh||o.n,x+5,y+3);
+    if(o.mag){ctx.fillStyle=col.replace('0.65','0.35');ctx.fillText(`${o.mag.toFixed(1)}`,x+5,y+11)}
+  }
+  ctx.restore();
+}
+
+// ════════════════════════════════════════════════════════════════
+// INFINITE PROCEDURAL DEEP STARS
+// ════════════════════════════════════════════════════════════════
+function drawProceduralStars(lod){
+  if(lod<4)return;
+  const tiles=getVisibleTiles(lod);
+  if(!tiles.length)return;
+  ctx.save();
+  const maxMag=lod<5?12:lod<6?14:lod<7?16:lod<8?18:lod<9?20:24;
+  for(const{tx,ty,depth}of tiles){
+    const stars=getTileStars(tx,ty,depth);
+    for(const s of stars){
+      if(s.mag>maxMag)continue;
+      const{x,y}=toXY(s.ra,s.dec);
+      if(!inView(x,y,2))continue;
+      const r=Math.max(0.3,2.2-s.mag*0.06)*Math.min(1.6,Math.sqrt(zoom)*0.2);
+      const alpha=Math.min(0.9,Math.max(0.05,(maxMag-s.mag)/(maxMag-10)*0.7*s.bright+0.05));
+      const col=STAR_CLR[s.type]||'#fff';
+      ctx.globalAlpha=alpha;
+      ctx.fillStyle=col;
+      ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+    }
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+
+// ════════════════════════════════════════════════════════════════
+// SOLAR SYSTEM / STAR SYSTEM LAYER (LOD 7+)
+// ════════════════════════════════════════════════════════════════
+const SOLAR_SYSTEM=[
+  {n:'Sun',dist:0,r:8,col:'#fff8a0',glow:'rgba(255,240,100,0.35)',type:'star',notes:'G2V main sequence star. 1 solar mass, surface temp 5778 K.'},
+  {n:'Mercury',dist:0.39,r:1.5,col:'#b0a090',orbit:88,notes:'0.39 AU. Smallest planet. Extreme temperature swings.'},
+  {n:'Venus',dist:0.72,r:2.8,col:'#e8d070',orbit:225,notes:'0.72 AU. Hottest planet (460°C). Dense CO₂ atmosphere.'},
+  {n:'Earth',dist:1.0,r:3.0,col:'#4090e0',orbit:365,notes:'1 AU. Our home. Liquid water, life, oxygen atmosphere.'},
+  {n:'Moon',dist:1.003,r:1.2,col:'#c8c8c8',orbit:365,isMoon:true,parent:'Earth',notes:'0.0026 AU from Earth. Tidally locked. 27.3 day orbit.'},
+  {n:'Mars',dist:1.52,r:2.2,col:'#c06030',orbit:687,notes:'1.52 AU. Red planet. Olympus Mons, Valles Marineris.'},
+  {n:'Jupiter',dist:5.2,r:6,col:'#c89060',orbit:4333,notes:'5.2 AU. Largest planet. 95 known moons. Great Red Spot.'},
+  {n:'Io',dist:5.204,r:1.0,col:'#e0c040',orbit:4333,isMoon:true,parent:'Jupiter',notes:'Io: most volcanically active body in solar system.'},
+  {n:'Europa',dist:5.208,r:1.0,col:'#c8d8e0',orbit:4333,isMoon:true,parent:'Jupiter',notes:'Europa: subsurface ocean, candidate for life.'},
+  {n:'Saturn',dist:9.58,r:5,col:'#d4c08a',orbit:10759,notes:'9.58 AU. Ring system extends 282,000 km. 146 moons.'},
+  {n:'Uranus',dist:19.2,r:4,col:'#80e0e8',orbit:30589,notes:'19.2 AU. Ice giant. Rotates on its side (98° tilt).'},
+  {n:'Neptune',dist:30.1,r:3.8,col:'#4060e0',orbit:59800,notes:'30.1 AU. Fastest winds in solar system (2,100 km/h).'},
+];
+
+function drawSolarSystem(lod){
+  if(lod<7)return;
+  const{ra:cRA,dec:cDec}=xyToRD(W/2,H/2);
+  // Is the viewport near a named star?
+  let nearStar=null;let nearDist=Infinity;
+  for(const s of STARS){
+    const p=toXY(s.ra,s.dec);
+    const d=Math.hypot(p.x-W/2,p.y-H/2);
+    if(d<nearDist){nearDist=d;nearStar=s}
+  }
+  if(!nearStar||nearDist>W*0.4)return;
+
+  ctx.save();
+  const{x:sx,y:sy}=toXY(nearStar.ra,nearStar.dec);
+  const isOurSun=(nearStar.n==='Proxima Centauri'||nearStar.dist_ly<5);
+  const systemName=isOurSun?'Solar System':`${nearStar.n} System`;
+
+  // Scale: at LOD 8, 1 AU ≈ zoom*0.06 px
+  const auScale=zoom*0.055*(lod>=9?5:1)*(lod>=10?8:1);
+  const planets=isOurSun?SOLAR_SYSTEM:[
+    {n:nearStar.n,dist:0,r:7,col:sColor(nearStar.t),glow:`rgba(255,200,100,0.3)`,type:'star',notes:nearStar.notes||''},
+    ...(aiPlanetCache[nearStar.n]||[])
+  ];
+
+  const fs=Math.max(8,Math.min(10,W/80));
+  ctx.font=`${fs}px 'Courier New'`;
+
+  for(const p of planets){
+    if(p.isMoon&&lod<9)continue;
+    const px2=sx+p.dist*auScale;
+    const py2=sy;
+    if(!inView(px2,py2,30))continue;
+
+    // Orbit ring
+    if(p.dist>0&&!p.isMoon&&lod>=8){
+      ctx.strokeStyle='rgba(126,200,227,0.08)';ctx.lineWidth=0.5;
+      ctx.beginPath();ctx.arc(sx,sy,p.dist*auScale,0,Math.PI*2);ctx.stroke();
+    }
+
+    // Planet/star glow
+    if(p.glow){
+      const g=ctx.createRadialGradient(px2,py2,0,px2,py2,p.r*4);
+      g.addColorStop(0,p.glow);g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=g;ctx.beginPath();ctx.arc(px2,py2,p.r*4,0,Math.PI*2);ctx.fill();
+    }
+
+    ctx.fillStyle=p.col;
+    ctx.beginPath();ctx.arc(px2,py2,Math.max(1.5,p.r*(lod>=9?1.5:1)),0,Math.PI*2);ctx.fill();
+
+    if(lod>=8){
+      ctx.fillStyle='rgba(126,200,227,0.8)';
+      ctx.fillText(p.n,px2+p.r+4,py2+4);
+      if(lod>=9&&p.notes){
+        ctx.fillStyle='rgba(126,200,227,0.4)';
+        ctx.font=`${Math.max(7,fs-1)}px 'Courier New'`;
+        ctx.fillText(p.notes.substring(0,40)+'…',px2+p.r+4,py2+13);
+        ctx.font=`${fs}px 'Courier New'`;
+      }
+    }
+  }
+
+  // Label the system
+  ctx.fillStyle='rgba(255,240,150,0.6)';
+  ctx.font=`bold ${fs+1}px 'Courier New'`;
+  ctx.fillText(systemName,sx+8,sy-12);
+
+  ctx.restore();
+}
+
+// Cache for AI-fetched planet data per star
+const aiPlanetCache={};
+
+// ════════════════════════════════════════════════════════════════
+// HIT TEST
+// ════════════════════════════════════════════════════════════════
+function getHit(x,y){
+  const lod=getLOD();
+  // Galaxies (low LOD)
+  if(lod<4.5){
+    for(const g of GALAXIES){
+      const p=toXY(g.ra,g.dec);
+      const r=Math.max(8,g.diam?g.diam/9*(lod<1?0.4:0.7)+6:8);
+      if(Math.hypot(p.x-x,p.y-y)<r)return{kind:'galaxy',obj:g};
+    }
+  }
+  // DSOs
+  if(lod>=2.5){
+    for(const d of DSO){
+      const p=toXY(d.ra,d.dec);
+      if(Math.hypot(p.x-x,p.y-y)<14)return{kind:'dso',obj:d};
+    }
+  }
+  // Named stars
+  if(lod>=1.8){
+    const magThresh=lod<2.5?0.5:lod<3?1.5:lod<4?2.5:lod<5?3.5:12;
+    for(const s of STARS){
+      if(s.mag>magThresh+0.5)continue;
+      const p=toXY(s.ra,s.dec);
+      if(Math.hypot(p.x-x,p.y-y)<sRadius(s.mag,zoom)+9)return{kind:'star',obj:s};
+    }
+  }
+  // AI objects
+  if(lod>=5){
+    const{ra,dec}=xyToRD(W/2,H/2),r2=lod>=6?3:8;
+    const key=`${Math.round(ra)}_${Math.round(dec)}_${Math.round(r2)}`;
+    const objs=aiCache[key]||[];
+    for(const o of objs){
+      const p=toXY(o.ra,o.dec);
+      if(Math.hypot(p.x-x,p.y-y)<10)return{kind:'ai',obj:o};
+    }
+  }
+  // Solar system objects
+  if(lod>=7){
+    let nearStar=null;let nearDist2=Infinity;
+    for(const s of STARS){const p=toXY(s.ra,s.dec);const d=Math.hypot(p.x-W/2,p.y-H/2);if(d<nearDist2){nearDist2=d;nearStar=s}}
+    if(nearStar&&nearDist2<W*0.4){
+      const{x:sx,y:sy}=toXY(nearStar.ra,nearStar.dec);
+      const auScale=zoom*0.055*(lod>=9?5:1)*(lod>=10?8:1);
+      const isOurSun=nearStar.dist_ly<5;
+      const planets=isOurSun?SOLAR_SYSTEM:(aiPlanetCache[nearStar.n]||[]);
+      for(const p of planets){
+        if(p.isMoon&&lod<9)continue;
+        const px2=sx+p.dist*auScale;const py2=sy;
+        if(Math.hypot(px2-x,py2-y)<Math.max(8,p.r*2))return{kind:'planet',obj:p};
+      }
+    }
+  }
+  return null;
+}
+
+function showTip(hit,px,py){
+  const o=hit.obj;let html='';
+  if(hit.kind==='galaxy'){
+  const d=o.dist;
+  const groupName = o.group === 'MW' ? 'Milky Way' : (o.group === 'M31' ? 'Andromeda' : (o.group === 'Nearby' ? 'Nearby (outside LG)' : 'Local Group'));
+  html=`<b>${o.n}</b> <span class="tip-tag">${o.sh}</span><br>Group: ${groupName}<br>Type: ${gTypeLabel(o.type||'')}${o.mag!=null?`<br>Mag: ${o.mag}`:''}${o.diam?`<br>Diameter: ~${o.diam}k ly`:''}<br>Distance: ${d<0.001?'Our galaxy':d<0.1?`${Math.round(d*1000)}k ly`:`${d.toFixed(3)} Mly`}`;
+  if(o.notes)html+=`<br><span class="tip-tag">${o.notes}</span>`;
+  }else if(hit.kind==='star'){
+    html=`<b>${o.n}</b> <span class="tip-tag">${o.sys}</span><br>Spectral: ${o.t}<br>Magnitude: ${o.mag}<br>Distance: ${o.dist_ly<100?o.dist_ly.toFixed(1):Math.round(o.dist_ly)} ly${o.exo?`<br><span style="color:#50ffb0">⬤ Exoplanet host</span>`:''}`;
+    if(o.notes)html+=`<br><span class="tip-tag">${o.notes}</span>`;
+  }else if(hit.kind==='dso'){
+    html=`<b>${o.n}</b> <span class="tip-tag">${o.sh}</span><br>Type: ${o.t}${o.mag!=null?`<br>Magnitude: ${o.mag}`:''}${o.sz?`<br>Angular size: ${o.sz}′`:''}`;
+    if(o.notes)html+=`<br><span class="tip-tag">${o.notes}</span>`;
+  }else if(hit.kind==='planet'){
+    html=`<b>${o.n}</b><br>Distance from star: ${o.dist===0?'0 (host star)':o.dist+' AU'}${o.notes?`<br><span class="tip-tag">${o.notes}</span>`:''}`;
+  }else if(hit.kind==='ai'){
+    html=`<b>${o.n}</b> <span class="tip-tag">${o.sh||''}</span><br>Type: ${o.t}${o.mag!=null?`<br>Magnitude: ${o.mag}`:''}`;
+    if(o.notes)html+=`<br><span class="tip-tag">${o.notes}</span>`;
+  }else{
+    html=`<b>${o.n}</b> <span class="tip-tag">${o.sh||''}</span><br>Type: ${o.t}${o.mag!=null?`<br>Magnitude: ${o.mag}`:''}`;
+    if(o.notes)html+=`<br><span class="tip-tag">${o.notes}</span>`;
+  }
+  html=html.replace("o.group===\"M31\"?Andromeda",'Andromeda');
+  tip.innerHTML=html;tip.style.display='block';
+  let tx=px+16,ty=py-10;
+  const tw=Math.min(220,W*0.5);
+  if(tx+tw>W)tx=px-tw-8;if(tx<4)tx=4;
+  if(ty+100>H)ty=H-105;if(ty<4)ty=4;
+  tip.style.left=tx+'px';tip.style.top=ty+'px';
+}
+
+// ════════════════════════════════════════════════════════════════
+// MAIN RENDER
+// ════════════════════════════════════════════════════════════════
+function draw(){
+  if(!W||!H)return;
+  const lod=getLOD();
+  drawBg();
+  drawBgStars(lod);
+  drawProceduralStars(lod);
+  drawGrid(lod);
+  drawMilkyWay(lod);
+  drawGalaxies(lod);
+  drawConstellations(lod);
+  drawNamedStars(lod);
+  drawDSO(lod);
+  drawAIObjects(lod);
+  drawSolarSystem(lod);
+  updateHUD();
+  needsDraw=false;
+}
+
+// Animate only when needed
+function loop(){
+  if(needsDraw)draw();
+  maybeAIFetch();
+  requestAnimationFrame(loop);
+}
+
+// ════════════════════════════════════════════════════════════════
+// INPUT
+// ════════════════════════════════════════════════════════════════
+function onPointerMove(cx,cy){
+  const{ra,dec}=xyToRD(cx,cy);
+  document.getElementById('coords-ra').textContent='RA '+fmtRA(ra);
+  document.getElementById('coords-dec').textContent='Dec '+fmtDec(dec);
+  if(drag){tip.style.display='none';return}
+  const hit=getHit(cx,cy);
+  if(hit)showTip(hit,cx,cy);
+  else tip.style.display='none';
+}
+
+wrap.addEventListener('mousemove',e=>{
+  const r=wrap.getBoundingClientRect(),cx=e.clientX-r.left,cy=e.clientY-r.top;
+  if(drag){panX+=cx-lx;panY+=cy-ly;needsDraw=true}
+  lx=cx;ly=cy;onPointerMove(cx,cy);
+});
+wrap.addEventListener('mousedown',e=>{drag=true;const r=wrap.getBoundingClientRect();lx=e.clientX-r.left;ly=e.clientY-r.top;wrap.classList.add('dragging')});
+window.addEventListener('mouseup',()=>{drag=false;wrap.classList.remove('dragging')});
+wrap.addEventListener('mouseleave',()=>{tip.style.display='none'});
+
+function applyZoom(factor,cx,cy){
+  const nz=Math.max(ZOOM_MIN,zoom*factor);
+  const oz=zoom;zoom=nz;
+  panX=cx+(panX-cx)*(zoom/oz);panY=cy+(panY-cy)*(zoom/oz);
+  needsDraw=true;
+}
+
+wrap.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const r=wrap.getBoundingClientRect();
+  applyZoom(e.deltaY<0?1.10:0.91,e.clientX-r.left,e.clientY-r.top);
+},{passive:false});
+
+// Touch
+wrap.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  if(e.touches.length===1){drag=true;const r=wrap.getBoundingClientRect(),t=e.touches[0];lx=t.clientX-r.left;ly=t.clientY-r.top}
+  if(e.touches.length===2){const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;ptd=Math.sqrt(dx*dx+dy*dy)}
+},{passive:false});
+wrap.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  if(e.touches.length===2&&ptd!==null){
+    const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;
+    const d=Math.sqrt(dx*dx+dy*dy);
+    const cx=(e.touches[0].clientX+e.touches[1].clientX)/2-wrap.getBoundingClientRect().left;
+    const cy=(e.touches[0].clientY+e.touches[1].clientY)/2-wrap.getBoundingClientRect().top;
+    applyZoom(d/ptd,cx,cy);ptd=d;
+  }else if(e.touches.length===1&&drag){
+    const r=wrap.getBoundingClientRect(),t=e.touches[0],cx=t.clientX-r.left,cy=t.clientY-r.top;
+    panX+=cx-lx;panY+=cy-ly;lx=cx;ly=cy;needsDraw=true;tip.style.display='none';
+  }
+},{passive:false});
+wrap.addEventListener('touchend',()=>{drag=false;ptd=null});
+
+document.getElementById('bi').onclick=()=>applyZoom(1.25,W/2,H/2);
+document.getElementById('bo').onclick=()=>applyZoom(0.8,W/2,H/2);
+document.getElementById('br').onclick=()=>{zoom=1;panX=0;panY=0;needsDraw=true};
+
+// ════════════════════════════════════════════════════════════════
+// RESIZE + INIT
+// ════════════════════════════════════════════════════════════════
+function resize(){
+  W=wrap.clientWidth||window.innerWidth;
+  H=wrap.clientHeight||window.innerHeight;
+  cv.width=W;cv.height=H;
+  needsDraw=true;
+}
+
+// Loading sequence
+const fills=[20,50,80,100];
+const lfill=document.getElementById('loading-fill');
+fills.forEach((v,i)=>setTimeout(()=>{lfill.style.width=v+'%';if(v===100)setTimeout(()=>document.getElementById('loading').classList.add('done'),400)},i*200));
+
+window.addEventListener('resize',()=>{resize();needsDraw=true});
+resize();
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+/* style.css */
+body {
+    font-family: 'Inter', sans-serif;
+    background: radial-gradient(circle at center, #0a0a1a 0%, #02040a 100%);
+}
+
+.font-mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Glassmorphism HUD Panels */
+.hud-panel {
+    background: rgba(10, 15, 25, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+    transition: all 0.3s ease;
+}
+
+.hud-panel:hover {
+    border-color: rgba(34, 211, 238, 0.2); /* cyan hover border */
+    box-shadow: 0 8px 32px 0 rgba(34, 211, 238, 0.1);
+}
+
+.hud-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 0.5rem;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+}
+
+.hud-btn:hover {
+    background: rgba(34, 211, 238, 0.1);
+    border-color: rgba(34, 211, 238, 0.3);
+}
+
+.hud-btn:active {
+    transform: scale(0.95);
+}
+
+/* SVG Text Effects */
+svg text {
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: none;
+}
+
+/* Grid animation for a subtle futuristic pulse */
+@keyframes gridPulse {
+    0% { opacity: 0.8; }
+    50% { opacity: 1; }
+    100% { opacity: 0.8; }
+}
+
+#grid-layer {
+    animation: gridPulse 8s infinite ease-in-out;
+}
+
+/* Custom Astro-Cow Cursor */
+* {
+    cursor: url('cow_cursor.svg') 32 30, auto !important;
+}
+
+#space-canvas:active, #minimap:active {
+    cursor: url('cow_cursor_active.svg') 26 26, auto !important;
+}

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Space Explorer | Interactive Map</title>
+    <!-- SEO Best Practices -->
+    <meta name="description" content="Explore the cosmos with this interactive, infinite canvas space map. Zoom from the Milky Way down to planetary systems.">
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-[#02040a] text-white font-sans overflow-hidden select-none">
+
+    <!-- Canvas for Deep Space rendering (Stars, Galaxies, Planets) -->
+    <canvas id="space-canvas" class="absolute inset-0 z-0 w-full h-full cursor-grab active:cursor-grabbing"></canvas>
+
+    <!-- Procedural SVG Overlay for Grids, Lines, and Crisp Text -->
+    <svg id="svg-overlay" class="absolute inset-0 z-10 w-full h-full pointer-events-none">
+        <defs>
+            <radialGradient id="star-glow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#ffffff" stop-opacity="0.8"/>
+                <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+            </radialGradient>
+        </defs>
+        
+        <!-- Sparse and Dense Coordinate Grids -->
+        <g id="grid-layer"></g>
+        
+        <!-- Constellation Lines -->
+        <g id="constellation-layer"></g>
+        
+        <!-- Dynamic Level of Detail Labels -->
+        <g id="label-layer"></g>
+    </svg>
+
+    <!-- Minimalist Futuristic HUD -->
+    <div id="hud" class="absolute inset-0 pointer-events-none p-6 flex flex-col justify-between z-20">
+        
+        <!-- Top UI Bar -->
+        <div class="flex justify-between items-start">
+            <div class="hud-panel p-4 rounded-xl pointer-events-auto">
+                <h1 class="text-2xl font-extrabold tracking-widest text-slate-200 uppercase font-sans drop-shadow-md">a cow's journey across space</h1>
+                <p class="text-xs text-gray-400 mt-1 tracking-wider uppercase font-mono">Current Sector: <span id="sector-name" class="text-white font-bold">Galactic Macro</span></p>
+            </div>
+            
+            <div class="hud-panel p-4 rounded-xl pointer-events-auto flex flex-col items-end min-w-[180px]">
+                <div class="text-[10px] text-gray-500 uppercase tracking-widest mb-2 font-bold">Real-time Telemetry</div>
+                <div class="font-mono text-sm text-slate-300 drop-shadow-sm w-full flex justify-between">
+                    <span class="text-gray-500">RA</span> <span id="coord-x" class="text-right">0.00</span>
+                </div>
+                <div class="font-mono text-sm text-slate-300 drop-shadow-sm w-full flex justify-between">
+                    <span class="text-gray-500">DEC</span> <span id="coord-y" class="text-right">0.00</span>
+                </div>
+                <div class="w-full h-[1px] bg-gray-700/50 my-2"></div>
+                <div class="font-mono text-xs text-slate-400 drop-shadow-sm w-full flex justify-between">
+                    <span class="text-gray-500">MAG</span> <span id="zoom-level" class="text-right">1.00x</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Left UI: Minimap -->
+        <div class="flex justify-start items-end pointer-events-auto absolute bottom-6 left-6">
+            <div class="hud-panel p-2 rounded-xl flex flex-col gap-2 relative">
+                <div class="text-[10px] text-gray-400 uppercase tracking-widest font-bold text-center mb-1">Galactic Overview</div>
+                <div class="relative w-48 h-48 bg-[#02040a] rounded-lg border border-gray-700/50 overflow-hidden cursor-crosshair" id="minimap">
+                    <canvas id="minimap-canvas" width="192" height="192" class="absolute inset-0 z-0"></canvas>
+                    <div id="minimap-viewport" class="absolute border border-slate-400 bg-slate-400/20 z-10 pointer-events-none transition-all duration-75"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Right UI Bar -->
+        <div class="flex justify-end items-end pointer-events-auto w-full h-full pb-0 pr-0">
+            <div class="hud-panel p-2 rounded-xl flex flex-col gap-2">
+                <button id="btn-zoom-in" class="hud-btn group" title="Zoom In">
+                    <svg class="w-6 h-6 text-gray-300 group-hover:text-slate-100 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                </button>
+                <div class="w-full h-[1px] bg-gray-700/50"></div>
+                <button id="btn-zoom-out" class="hud-btn group" title="Zoom Out">
+                    <svg class="w-6 h-6 text-gray-300 group-hover:text-slate-100 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+                </button>
+                <button id="btn-reset" class="mt-2 text-[10px] font-bold uppercase tracking-widest px-2 py-2 bg-slate-700/60 hover:bg-slate-600 rounded-lg transition-all text-white border border-slate-600/50">
+                    Recenter
+                </button>
+                <button id="btn-find-home" class="mt-2 text-[10px] font-bold uppercase tracking-widest px-2 py-2 bg-emerald-700/60 hover:bg-emerald-600 rounded-lg transition-all text-white border border-emerald-600/50 shadow-[0_0_10px_rgba(16,185,129,0.3)]">
+                    Find Home
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
