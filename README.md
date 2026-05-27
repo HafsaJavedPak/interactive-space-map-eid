@@ -5,7 +5,7 @@
 
 A minimalist, interactive deep space map built on HTML5 Canvas and procedural SVGs. Follow a cow's journey across the cosmos, navigating from the galactic macro view down to individual planetary systems.
 
-This project was built to celebrate Eid Ul Adha with a creative, cosmic theme.
+This project was built to celebrate Eid Ul Adha with a creative, cosmic theme. Can be viewed live [here](https://hafsajavedpak.github.io/interactive-space-map-eid).
 
 ## Features
 
